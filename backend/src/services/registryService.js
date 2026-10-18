@@ -9,11 +9,11 @@ class RegistryService {
 
   async createCustomer(data) {
     const id = data.pelanggan_id || data.kode_pelanggan;
-    const nama = data.pelanggan_nama || data.nama_pelanggan;
-    const hp = data.pelanggan_no_hp || data.telepon;
+    const nama = data.pelanggan_nama || data.nama_perusahaan || data.nama_pelanggan;
+    const hp = data.pelanggan_telp || data.pelanggan_no_hp || data.telepon;
     if (!id || !nama || !hp) {
       throw new AppError(
-        'ID/Kode pelanggan (pelanggan_id), nama pelanggan, dan nomor HP wajib diisi.',
+        'ID/Kode pelanggan (pelanggan_id), nama pelanggan (pelanggan_nama), dan nomor telepon (pelanggan_telp) wajib diisi.',
         400,
         'VALIDATION_ERROR'
       );
@@ -40,12 +40,12 @@ class RegistryService {
 
   async createVehicle(data) {
     const nopol = data.motor_nopol || data.plat_nomor;
-    const merk = data.motor_merk || data.merk;
+    const merk = data.motor_merek || data.motor_merk || data.merk;
     const tipe = data.motor_tipe || data.tipe;
     const noRangka = data.motor_no_rangka || data.nomor_rangka;
     if (!data.pelanggan_id || !nopol || !merk || !tipe || !noRangka) {
       throw new AppError(
-        'Pemilik (pelanggan_id), plat nomor (motor_nopol), merk, tipe, dan nomor rangka wajib diisi.',
+        'Pemilik (pelanggan_id), plat nomor (motor_nopol), merek (motor_merek), tipe, dan nomor rangka wajib diisi.',
         400,
         'VALIDATION_ERROR'
       );
@@ -72,11 +72,16 @@ class RegistryService {
 
   async createService(data) {
     const kode = data.jasa_kode || data.kode_jasa;
-    const nama = data.jasa_nama || data.nama_jasa;
-    const harga = data.jasa_harga !== undefined ? data.jasa_harga : data.harga_jasa;
+    const nama = data.jasa_uraian || data.jasa_nama || data.nama_jasa;
+    const harga =
+      data.jasa_biaya !== undefined
+        ? data.jasa_biaya
+        : data.jasa_harga !== undefined
+        ? data.jasa_harga
+        : data.harga_jasa;
     if (!kode || !nama || harga === undefined) {
       throw new AppError(
-        'Kode jasa (jasa_kode), nama jasa (jasa_nama), dan harga jasa (jasa_harga) wajib diisi.',
+        'Kode jasa (jasa_kode), uraian jasa (jasa_uraian), dan biaya jasa (jasa_biaya) wajib diisi.',
         400,
         'VALIDATION_ERROR'
       );
@@ -104,10 +109,9 @@ class RegistryService {
   async createSparepart(data) {
     const kode = data.suku_cadang_kode || data.kode_sku;
     const nama = data.suku_cadang_nama || data.nama_part;
-    const kategori = data.suku_cadang_kategori || data.kategori;
-    if (!kode || !nama || !kategori) {
+    if (!kode || !nama) {
       throw new AppError(
-        'Kode suku cadang (suku_cadang_kode), nama suku cadang, dan kategori wajib diisi.',
+        'Kode suku cadang (suku_cadang_kode) dan nama suku cadang (suku_cadang_nama) wajib diisi.',
         400,
         'VALIDATION_ERROR'
       );
@@ -135,10 +139,10 @@ class RegistryService {
   async createSupplier(data) {
     const kode = data.supplier_id || data.kode_supplier;
     const nama = data.supplier_nama || data.nama_supplier;
-    const kontak = data.supplier_kontak || data.telepon;
+    const kontak = data.supplier_telp || data.supplier_kontak || data.telepon;
     if (!kode || !nama || !kontak) {
       throw new AppError(
-        'ID supplier (supplier_id), nama supplier, dan kontak/telepon wajib diisi.',
+        'ID supplier (supplier_id), nama supplier (supplier_nama), dan nomor telepon (supplier_telp) wajib diisi.',
         400,
         'VALIDATION_ERROR'
       );

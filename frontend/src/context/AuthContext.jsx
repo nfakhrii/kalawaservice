@@ -51,12 +51,12 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  // Jika belum ada sesi saat pertama kali dibuka, otomatis inisialisasi default demo (admin_cabang)
-  // namun halaman /auth/login tetap dapat diakses penuh kapan saja
+  // Jika belum ada sesi saat pertama kali dibuka, inisialisasi sesi default demo
+  // menggunakan autentikasi akun PostgreSQL asli user_admin_cabang
   useEffect(() => {
     if (!token || !user) {
       api
-        .quickSwitchRole('admin_cabang')
+        .login('user_admin_cabang', 'AdminKalawa123')
         .then((res) => {
           saveSession(res.data.token, res.data.user);
         })
@@ -88,4 +88,3 @@ export function useAuth() {
   }
   return ctx;
 }
-

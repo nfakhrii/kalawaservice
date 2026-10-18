@@ -3,7 +3,22 @@ const fs = require('fs');
 const path = require('path');
 
 class DiagnosticsRepository {
+  getRoleFlags() {
+    const user = db.getCurrentUserContext();
+    const role = user?.role || 'admin_cabang';
+    return {
+      role,
+      isRestrictedCustomer: ['kasir', 'mekanik', 'gudang', 'auditor'].includes(role),
+      isRestrictedWo: ['mekanik', 'gudang', 'auditor'].includes(role),
+      canReadAuditLog: ['owner', 'admin_cabang', 'auditor'].includes(role),
+    };
+  }
+
   async getSystemInspection() {
+    const { isRestrictedCustomer, isRestrictedWo, canReadAuditLog } = this.getRoleFlags();
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+
     const triggersSql = `
       SELECT
         tgname AS trigger_name,
@@ -38,7 +53,7 @@ class DiagnosticsRepository {
         (SELECT COUNT(*) FROM "CABANG") AS cabang,
         (SELECT COUNT(*) FROM "PEGAWAI") AS pegawai,
         (SELECT COUNT(*) FROM "MEKANIK") AS mekanik,
-        (SELECT COUNT(*) FROM "PELANGGAN") AS pelanggan,
+        (SELECT COUNT(*) FROM ${customerSource}) AS pelanggan,
         (SELECT COUNT(*) FROM "KONTRAK_KORPORAT") AS kontrak_korporat,
         (SELECT COUNT(*) FROM "MOTOR") AS motor,
         (SELECT COUNT(*) FROM "RIWAYAT_KEPEMILIKAN") AS riwayat_kepemilikan,
@@ -46,21 +61,25 @@ class DiagnosticsRepository {
         (SELECT COUNT(*) FROM "SUPPLIER") AS supplier,
         (SELECT COUNT(*) FROM "SUKU_CADANG") AS suku_cadang,
         (SELECT COUNT(*) FROM "STOK_CABANG") AS stok_cabang,
-        (SELECT COUNT(*) FROM "WORK_ORDER") AS work_order,
+        (SELECT COUNT(*) FROM ${woSource}) AS work_order,
         (SELECT COUNT(*) FROM "WO_MEKANIK") AS wo_mekanik,
         (SELECT COUNT(*) FROM "WO_JASA") AS wo_jasa,
         (SELECT COUNT(*) FROM "WO_SUKU_CADANG") AS wo_suku_cadang,
         (SELECT COUNT(*) FROM "GARANSI") AS garansi,
         (SELECT COUNT(*) FROM "TAGIHAN_KOLEKTIF") AS tagihan_kolektif,
-        (SELECT COUNT(*) FROM "AUDIT_LOG") AS audit_log;
+        ${canReadAuditLog ? '(SELECT COUNT(*) FROM "AUDIT_LOG")' : '0'} AS audit_log;
     `;
+
+    const paidWoSelect = isRestrictedWo
+      ? `(SELECT work_no FROM "VW_WORK_ORDER_AMAN" WHERE work_status IN ('Selesai', 'Dibayar') ORDER BY work_no ASC LIMIT 1)`
+      : `(SELECT work_no FROM "WORK_ORDER" WHERE pembayaran_status = 'Lunas' ORDER BY work_no ASC LIMIT 1)`;
 
     const sampleTargetsSql = `
       SELECT
-        (SELECT work_no FROM "WORK_ORDER" WHERE pembayaran_status = 'Lunas' ORDER BY work_no ASC LIMIT 1) AS paid_wo_id,
-        (SELECT work_no FROM "WORK_ORDER" WHERE pembayaran_status = 'Lunas' ORDER BY work_no ASC LIMIT 1) AS paid_wo_nomor,
-        (SELECT work_no FROM "WORK_ORDER" WHERE work_status IN ('Dibuat', 'Diproses', 'Antre', 'Dikerjakan') ORDER BY work_no ASC LIMIT 1) AS active_wo_id,
-        (SELECT work_no FROM "WORK_ORDER" WHERE work_status IN ('Dibuat', 'Diproses', 'Antre', 'Dikerjakan') ORDER BY work_no ASC LIMIT 1) AS active_wo_nomor,
+        ${paidWoSelect} AS paid_wo_id,
+        ${paidWoSelect} AS paid_wo_nomor,
+        (SELECT work_no FROM ${woSource} WHERE work_status IN ('Dibuat', 'Diproses', 'Antre', 'Dikerjakan') ORDER BY work_no ASC LIMIT 1) AS active_wo_id,
+        (SELECT work_no FROM ${woSource} WHERE work_status IN ('Dibuat', 'Diproses', 'Antre', 'Dikerjakan') ORDER BY work_no ASC LIMIT 1) AS active_wo_nomor,
         (
           SELECT st.suku_cadang_kode
           FROM "STOK_CABANG" st
@@ -145,6 +164,7 @@ class DiagnosticsRepository {
     const sql = `
       SELECT
         al.audit_id,
+        al.audit_id AS log_id,
         al.nama_tabel,
         al.nama_tabel AS tabel_nama,
         al.nama_operasi,

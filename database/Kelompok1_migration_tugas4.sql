@@ -131,7 +131,7 @@ CREATE TABLE "TAGIHAN_KOLEKTIF" (
         CHECK ("total_tagihan" >= 0),
 
     CONSTRAINT "chk_tagihan_status"
-        CHECK ("status_tagihan" IN ('Belum Dibayar', 'Lunas'))
+        CHECK ("status_tagihan" IN ('Belum Lunas', 'Belum Dibayar', 'Lunas'))
 );
 
 -- 2.d. Tambahkan kolom "tagihan_id" pada "WORK_ORDER" & perbarui "chk_pembayaran_metode"
@@ -201,6 +201,8 @@ FROM "WORK_ORDER";
 CREATE OR REPLACE FUNCTION fn_hitung_total_tagihan(p_work_no VARCHAR)
 RETURNS INT
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_total INT := 0;
@@ -210,12 +212,18 @@ BEGIN
 END;
 $$;
 
--- 4.b. Perluas fn_audit_log() agar juga mencatat KONTRAK_KORPORAT & TAGIHAN_KOLEKTIF
+-- Pastikan stored function/trigger internal Tugas 3 dapat membaca tabel referensi
+-- ketika dipanggil oleh role terbatas (seperti role_mekanik / role_auditor via View)
+ALTER FUNCTION fn_status_garansi_by_wo(VARCHAR) SECURITY DEFINER;
+ALTER FUNCTION sp_riwayat_servis(VARCHAR) SECURITY DEFINER;
+ALTER FUNCTION sp_daftar_wo_cabang(TIMESTAMPTZ, TIMESTAMPTZ, VARCHAR) SECURITY DEFINER;
+ALTER FUNCTION trg_fn_kurangi_stok() SECURITY DEFINER;
+
+-- 4.b. Perluas fn_audit_log() (tetap SECURITY INVOKER agar CURRENT_USER mencatat
+--      akun PostgreSQL aktif dari SET LOCAL ROLE: user_owner, user_admin_cabang, dll.)
 CREATE OR REPLACE FUNCTION "fn_audit_log"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_data_id VARCHAR(50);
@@ -305,7 +313,11 @@ FOR EACH ROW EXECUTE FUNCTION "fn_audit_log"();
 
 -- 4.c. Trigger pengembalian stok saat item dihapus dari "WO_SUKU_CADANG"
 CREATE OR REPLACE FUNCTION trg_fn_kembalikan_stok()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     v_cabang_kode VARCHAR(10);
 BEGIN
@@ -322,7 +334,7 @@ BEGIN
 
     RETURN OLD;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS trg_kembalikan_stok_suku_cadang ON "WO_SUKU_CADANG";
 CREATE TRIGGER trg_kembalikan_stok_suku_cadang
@@ -332,7 +344,11 @@ FOR EACH ROW EXECUTE FUNCTION trg_fn_kembalikan_stok();
 -- 4.d. Trigger Otomatis Pemotongan Plafon Kredit saat Work Order Korporat
 --      ditagihkan ke "TAGIHAN_KOLEKTIF" atau menggunakan metode 'Tagihan Kolektif'
 CREATE OR REPLACE FUNCTION trg_fn_potong_plafon_korporat()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
     v_pelanggan_id VARCHAR(10);
     v_tipe VARCHAR(20);
@@ -367,7 +383,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS trg_potong_plafon_korporat ON "WORK_ORDER";
 CREATE TRIGGER trg_potong_plafon_korporat
@@ -376,7 +392,11 @@ FOR EACH ROW EXECUTE FUNCTION trg_fn_potong_plafon_korporat();
 
 -- 4.e. Trigger Otomatis Pemulihan Plafon Kredit saat "TAGIHAN_KOLEKTIF" dilunasi akhir bulan
 CREATE OR REPLACE FUNCTION trg_fn_lunasi_tagihan_kolektif()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 BEGIN
     IF OLD.status_tagihan <> 'Lunas' AND NEW.status_tagihan = 'Lunas' THEN
         NEW.tgl_lunas := COALESCE(NEW.tgl_lunas, CURRENT_TIMESTAMP);
@@ -395,7 +415,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS trg_lunasi_tagihan_kolektif ON "TAGIHAN_KOLEKTIF";
 CREATE TRIGGER trg_lunasi_tagihan_kolektif
@@ -404,15 +424,40 @@ FOR EACH ROW EXECUTE FUNCTION trg_fn_lunasi_tagihan_kolektif();
 
 -- ============================================================================
 -- 5. HAK AKSES (GRANT) TABEL & OBJEK BARU KE 6 ROLE KELOMPOK 1
+--    (Mempertahankan REVOKE keamanan Kelompok1_admin_security.sql untuk SET LOCAL ROLE)
 -- ============================================================================
 
+-- Izinkan trigger fn_audit_log() menulis ke AUDIT_LOG saat dieksekusi oleh role operasional
+GRANT INSERT ON "AUDIT_LOG" TO role_owner, role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang;
+GRANT USAGE, SELECT ON SEQUENCE "AUDIT_LOG_audit_id_seq" TO role_owner, role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang;
+GRANT SELECT ON "AUDIT_LOG" TO role_owner, role_auditor, role_admin_cabang;
+
+-- Hak akses tabel baru Corporate B2B
 GRANT SELECT, INSERT, UPDATE, DELETE ON "KONTRAK_KORPORAT", "TAGIHAN_KOLEKTIF" TO role_owner;
 GRANT SELECT, INSERT, UPDATE, DELETE ON "KONTRAK_KORPORAT", "TAGIHAN_KOLEKTIF" TO role_admin_cabang;
 GRANT SELECT, INSERT, UPDATE ON "TAGIHAN_KOLEKTIF" TO role_kasir;
 GRANT SELECT ON "KONTRAK_KORPORAT" TO role_kasir;
-GRANT SELECT ON "KONTRAK_KORPORAT", "TAGIHAN_KOLEKTIF" TO role_auditor;
-GRANT SELECT ON "VW_PELANGGAN_AMAN" TO role_kasir, role_mekanik, role_auditor;
-GRANT SELECT ON "VW_WORK_ORDER_AMAN" TO role_mekanik, role_auditor;
+GRANT SELECT ON "KONTRAK_KORPORAT", "TAGIHAN_KOLEKTIF" TO role_auditor, role_mekanik, role_petugas_gudang;
+
+-- Hak akses penuh Admin Cabang pada Supplier & Relasi Supplier (untuk halaman Registry Supplier)
+GRANT SELECT, INSERT, UPDATE, DELETE ON "SUPPLIER", "SUPPLIER_SUKU_CADANG" TO role_admin_cabang;
+
+-- Hak baca katalog/referensi non-sensitif agar navigasi dashboard/analytics tidak error,
+-- TANPA memberikan SELECT pada "PELANGGAN" (untuk kasir, mekanik, auditor) dan
+-- TANPA memberikan SELECT pada "WORK_ORDER" (untuk mekanik, auditor)
+GRANT SELECT ON
+    "CABANG", "PEGAWAI", "MEKANIK", "MOTOR", "RIWAYAT_KEPEMILIKAN",
+    "JASA_SERVIS", "SUKU_CADANG", "STOK_CABANG", "SUPPLIER", "SUPPLIER_SUKU_CADANG",
+    "WO_MEKANIK", "WO_JASA", "WO_SUKU_CADANG", "GARANSI",
+    "VW_PELANGGAN_AMAN", "VW_WORK_ORDER_AMAN"
+TO role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang, role_auditor;
+
+-- Pastikan REVOKE sensitif dari Kelompok1_admin_security.sql tetap terkunci rapat:
+REVOKE SELECT ON "PELANGGAN" FROM role_kasir, role_mekanik, role_auditor, role_petugas_gudang;
+REVOKE SELECT ON "WORK_ORDER" FROM role_mekanik, role_auditor, role_petugas_gudang;
+REVOKE UPDATE ON "WORK_ORDER" FROM role_mekanik;
+GRANT UPDATE ("work_status", "work_tgl_selesai", "work_keluhan") ON "WORK_ORDER" TO role_mekanik;
+GRANT SELECT ("work_no", "work_tgl_masuk", "work_tgl_selesai", "work_status", "work_keluhan") ON "WORK_ORDER" TO role_mekanik;
 
 -- ============================================================================
 -- 6. DATA UJI TAMBAHAN (SEED TUGAS 4)

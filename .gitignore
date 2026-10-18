@@ -30,7 +30,9 @@ Thumbs.db
 # Database backup binaries (optional, keep dump or sql scripts if needed)
 # database/backups/*.dump
 
-
 # Internal planning & specs
 specification.md
+SPECIFICATION.md
 ALIGNMENT_PLAN.md
+MASTER_ALIGNMENT_PLAN.md
+MASTER_ALIGNMENT_PLAN.md.md

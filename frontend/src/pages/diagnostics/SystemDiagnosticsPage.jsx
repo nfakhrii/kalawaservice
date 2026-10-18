@@ -459,9 +459,9 @@ export default function SystemDiagnosticsPage() {
                 </tr>
               ) : (
                 auditLogs.map((log) => (
-                  <tr key={log.log_id} className="hover:bg-[#f6f8fa]/70 align-top">
+                  <tr key={log.audit_id || log.log_id} className="hover:bg-[#f6f8fa]/70 align-top">
                     <td className="py-2 px-3 font-mono font-semibold text-[#656d76]">
-                      #{log.log_id}
+                      #{log.audit_id || log.log_id}
                     </td>
                     <td className="py-2 px-3 font-mono font-semibold text-[#0969da]">
                       &quot;{log.nama_tabel}&quot;

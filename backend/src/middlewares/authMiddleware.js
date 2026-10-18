@@ -1,45 +1,19 @@
 const jwt = require('jsonwebtoken');
 const AppError = require('../utils/AppError');
+const { runWithUserContext } = require('../config/db');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'kalawa-service-enterprise-secret-key-2026';
 
-const ROLE_NORMALIZER = {
-  owner: 'owner',
-  role_owner: 'owner',
-  user_owner: 'owner',
-  admin_cabang: 'admin_cabang',
-  role_admin_cabang: 'admin_cabang',
-  user_admin_cabang: 'admin_cabang',
-  kasir: 'kasir',
-  role_kasir: 'kasir',
-  user_kasir: 'kasir',
-  mekanik: 'mekanik',
-  role_mekanik: 'mekanik',
-  user_mekanik: 'mekanik',
-  gudang: 'gudang',
-  petugas_gudang: 'gudang',
-  role_petugas_gudang: 'gudang',
-  user_gudang: 'gudang',
-  auditor: 'auditor',
-  role_auditor: 'auditor',
-  user_auditor: 'auditor',
-};
-
-function normalizeRole(role) {
-  if (!role) return '';
-  const key = String(role).trim().toLowerCase();
-  return ROLE_NORMALIZER[key] || key;
-}
-
 /**
- * Middleware Autentikasi JWT
+ * Middleware untuk memverifikasi JWT Token di header Authorization
+ * sekaligus mengikat konteks request ke akun PostgreSQL asli (SET LOCAL ROLE)
  */
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return next(
       new AppError(
-        'Akses ditolak: Token autentikasi JWT tidak ditemukan pada header Authorization.',
+        'Akses ditolak: Token autentikasi (Bearer JWT) tidak ditemukan.',
         401,
         'UNAUTHORIZED_MISSING_TOKEN'
       )
@@ -50,11 +24,11 @@ function authenticateToken(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
-    return next();
-  } catch (err) {
+    return runWithUserContext(decoded, () => next());
+  } catch (_err) {
     return next(
       new AppError(
-        'Sesi tidak valid atau token JWT telah kedaluwarsa.',
+        'Sesi tidak valid atau telah kedaluwarsa. Silakan login kembali.',
         401,
         'UNAUTHORIZED_INVALID_TOKEN'
       )
@@ -63,35 +37,40 @@ function authenticateToken(req, res, next) {
 }
 
 /**
- * Middleware Role-Based Access Control (RBAC) — Skenario Debugging #4
- * Menolak akses dengan HTTP 403 Forbidden jika role user tidak terdaftar pada allowedRoles.
- * Role 'owner' (role_owner) adalah superuser di Kelompok1_admin_security.sql dan memiliki akses penuh.
+ * SKENARIO DEBUGGING #4: User Tanpa Privilege (RBAC Violation) -> HTTP 403 Forbidden
+ * Memvalidasi role pengguna terhadap daftar role yang diizinkan pada endpoint terkait.
+ * Selaras dengan 6 Role di Kelompok1_admin_security.sql:
+ * - owner (user_owner / role_owner)
+ * - admin_cabang (user_admin_cabang / role_admin_cabang)
+ * - kasir (user_kasir / role_kasir)
+ * - mekanik (user_mekanik / role_mekanik)
+ * - gudang (user_gudang / role_petugas_gudang)
+ * - auditor (user_auditor / role_auditor)
  */
 function authorizeRoles(...allowedRoles) {
-  const normalizedAllowed = new Set(allowedRoles.map(normalizeRole));
-  // Owner memiliki hak akses penuh pada seluruh modul sesuai Kelompok1_admin_security.sql
-  normalizedAllowed.add('owner');
-
   return (req, res, next) => {
     if (!req.user || !req.user.role) {
       return next(
-        new AppError('Identitas role pengguna tidak terdeteksi.', 401, 'UNAUTHORIZED')
+        new AppError(
+          'Identitas pengguna tidak terautentikasi.',
+          401,
+          'UNAUTHORIZED_USER'
+        )
       );
     }
 
-    const userRole = normalizeRole(req.user.role);
-
-    if (!normalizedAllowed.has(userRole)) {
+    const userRole = req.user.role;
+    if (!allowedRoles.includes(userRole)) {
       return next(
         new AppError(
-          `Akses Ditolak (403 Forbidden): Role '${req.user.db_role || req.user.role}' (${req.user.username}) tidak memiliki hak akses (privilege) untuk menjalankan operasi pada endpoint '${req.method} ${req.originalUrl}'. Role yang diizinkan: [${Array.from(normalizedAllowed).join(', ')}].`,
+          `Akses Ditolak (RBAC Violation): Akun '${req.user.username}' dengan role '${userRole}' (${req.user.db_role || 'role_' + userRole}) tidak memiliki hak akses (privilege) untuk menjalankan operasi ini. Role yang diizinkan: [${allowedRoles.join(', ')}].`,
           403,
           'FORBIDDEN_INSUFFICIENT_PRIVILEGE',
           {
             currentUser: req.user.username,
-            currentRole: req.user.role,
-            dbRole: req.user.db_role || `role_${userRole}`,
-            requiredRoles: Array.from(normalizedAllowed),
+            currentRole: userRole,
+            currentDbRole: req.user.db_role,
+            requiredRoles: allowedRoles,
             endpoint: `${req.method} ${req.originalUrl}`,
           }
         )
@@ -105,6 +84,4 @@ function authorizeRoles(...allowedRoles) {
 module.exports = {
   authenticateToken,
   authorizeRoles,
-  normalizeRole,
-  JWT_SECRET,
 };

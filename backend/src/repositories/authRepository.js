@@ -1,172 +1,137 @@
-const db = require('../config/db');
+const { pool } = require('../config/db');
 
-const ROLE_ALIASES = {
-  owner: 'owner',
-  role_owner: 'owner',
-  user_owner: 'owner',
-  admin_cabang: 'admin_cabang',
-  role_admin_cabang: 'admin_cabang',
-  user_admin_cabang: 'admin_cabang',
-  kasir: 'kasir',
-  role_kasir: 'kasir',
-  user_kasir: 'kasir',
-  mekanik: 'mekanik',
-  role_mekanik: 'mekanik',
-  user_mekanik: 'mekanik',
-  gudang: 'gudang',
-  petugas_gudang: 'gudang',
-  role_petugas_gudang: 'gudang',
-  user_gudang: 'gudang',
-  auditor: 'auditor',
-  role_auditor: 'auditor',
-  user_auditor: 'auditor',
-};
-
-const BASE_USERS_CTE = `
-  WITH account_catalog AS (
-    SELECT
-      1 AS sort_order,
-      'user_owner'::VARCHAR AS username,
-      'role_owner'::VARCHAR AS db_role,
-      'owner'::VARCHAR AS role,
-      'Owner'::VARCHAR AS role_label,
-      'OwnerKalawa123'::VARCHAR AS default_password,
-      'PG008'::VARCHAR AS pegawai_id,
-      'CB001'::VARCHAR AS default_cabang_kode,
-      'Hendra Setiawan (Owner)'::VARCHAR AS override_nama,
-      'owner@kalawa-service.co.id'::VARCHAR AS email
-    UNION ALL
-    SELECT
-      2,
-      'user_admin_cabang',
-      'role_admin_cabang',
-      'admin_cabang',
-      'Admin Cabang',
-      'AdminKalawa123',
-      'PG001',
-      'CB001',
-      NULL,
-      'rinaldi.admin@kalawa-service.co.id'
-    UNION ALL
-    SELECT
-      3,
-      'user_kasir',
-      'role_kasir',
-      'kasir',
-      'Kasir',
-      'KasirKalawa123',
-      'PG002',
-      'CB001',
-      NULL,
-      'budi.kasir@kalawa-service.co.id'
-    UNION ALL
-    SELECT
-      4,
-      'user_mekanik',
-      'role_mekanik',
-      'mekanik',
-      'Mekanik',
-      'MekanikKalawa123',
-      'PG003',
-      'CB001',
-      NULL,
-      'candra.mekanik@kalawa-service.co.id'
-    UNION ALL
-    SELECT
-      5,
-      'user_gudang',
-      'role_petugas_gudang',
-      'gudang',
-      'Petugas Gudang',
-      'GudangKalawa123',
-      'PG007',
-      'CB002',
-      NULL,
-      'gilang.gudang@kalawa-service.co.id'
-    UNION ALL
-    SELECT
-      6,
-      'user_auditor',
-      'role_auditor',
-      'auditor',
-      'Auditor',
-      'AuditorKalawa123',
-      'PG008',
-      'CB003',
-      'Hendra Setiawan (Auditor)',
-      'auditor@kalawa-service.co.id'
-  )
-  SELECT
-    p.pegawai_id AS id,
-    p.pegawai_id,
-    p.cabang_kode AS cabang_id,
-    p.cabang_kode,
-    p.cabang_kode AS kode_cabang,
-    c.cabang_nama AS nama_cabang,
-    c.cabang_nama,
-    'Palangka Raya'::VARCHAR AS kota_cabang,
-    ac.username,
-    COALESCE(ac.override_nama, p.pegawai_nama) AS nama_lengkap,
-    p.pegawai_nama,
-    p.pegawai_telp,
-    p.pegawai_peran AS pegawai_jabatan,
-    p.pegawai_peran,
-    ac.email,
-    ac.default_password AS password_hash,
-    ac.role,
-    ac.db_role,
-    ac.role_label,
-    p.status_aktif,
-    EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = ac.db_role) AS pg_role_active
-  FROM account_catalog ac
-  JOIN "PEGAWAI" p ON p.pegawai_id = ac.pegawai_id
-  JOIN "CABANG" c ON c.cabang_kode = p.cabang_kode
-`;
+/**
+ * Daftar whitelist resmi 6 akun PostgreSQL dari Kelompok1_admin_security.sql
+ * beserta pemetaan ke pegawai_id ("PEGAWAI") dan cabang_kode ("CABANG").
+ * TIDAK ADA password plaintext maupun password_hash yang disimpan di sini;
+ * verifikasi password dilakukan langsung oleh engine PostgreSQL (pg_authid).
+ */
+const KELOMPOK1_PG_ACCOUNTS = [
+  {
+    id: 'PG000',
+    pegawai_id: null,
+    username: 'user_owner',
+    role: 'owner',
+    db_role: 'role_owner',
+    fallback_nama: 'Hendra Setiawan (Owner Kalawa)',
+    fallback_jabatan: 'Owner / Pemilik Bengkel',
+    cabang_kode: 'CB001',
+  },
+  {
+    id: 'PG001',
+    pegawai_id: 'PG001',
+    username: 'user_admin_cabang',
+    role: 'admin_cabang',
+    db_role: 'role_admin_cabang',
+    fallback_nama: 'Rinaldi Rizwar',
+    fallback_jabatan: 'Admin Cabang',
+    cabang_kode: 'CB001',
+  },
+  {
+    id: 'PG002',
+    pegawai_id: 'PG002',
+    username: 'user_kasir',
+    role: 'kasir',
+    db_role: 'role_kasir',
+    fallback_nama: 'Budi Santoso',
+    fallback_jabatan: 'Kasir Bengkel',
+    cabang_kode: 'CB001',
+  },
+  {
+    id: 'PG003',
+    pegawai_id: 'PG003',
+    username: 'user_mekanik',
+    role: 'mekanik',
+    db_role: 'role_mekanik',
+    fallback_nama: 'Candra Hasibuan',
+    fallback_jabatan: 'Mekanik Spesialis',
+    cabang_kode: 'CB001',
+  },
+  {
+    id: 'PG007',
+    pegawai_id: 'PG007',
+    username: 'user_gudang',
+    role: 'gudang',
+    db_role: 'role_petugas_gudang',
+    fallback_nama: 'Gilang Ramadhan',
+    fallback_jabatan: 'Petugas Gudang Suku Cadang',
+    cabang_kode: 'CB002',
+  },
+  {
+    id: 'PG008',
+    pegawai_id: 'PG008',
+    username: 'user_auditor',
+    role: 'auditor',
+    db_role: 'role_auditor',
+    fallback_nama: 'Hendra Setiawan (Auditor)',
+    fallback_jabatan: 'Auditor Internal',
+    cabang_kode: 'CB003',
+  },
+];
 
 class AuthRepository {
-  normalizeRoleKey(input) {
-    if (!input) return null;
-    const key = String(input).trim().toLowerCase();
-    return ROLE_ALIASES[key] || key;
+  async hydrateAccountMetadata(accountDef) {
+    if (!accountDef) return null;
+
+    const sql = `
+      SELECT
+        pg.pegawai_id,
+        pg.pegawai_nama,
+        pg.pegawai_peran,
+        c.cabang_kode,
+        c.cabang_nama,
+        'Palangka Raya'::VARCHAR AS kota,
+        r.rolname AS verified_pg_role
+      FROM pg_roles r
+      LEFT JOIN "PEGAWAI" pg ON pg.pegawai_id = $2
+      LEFT JOIN "CABANG" c ON c.cabang_kode = $3
+      WHERE r.rolname = $1
+      LIMIT 1;
+    `;
+
+    const { rows } = await pool.query(sql, [
+      accountDef.username,
+      accountDef.pegawai_id,
+      accountDef.cabang_kode,
+    ]);
+    const row = rows[0] || {};
+
+    return {
+      id: accountDef.id,
+      pegawai_id: accountDef.pegawai_id,
+      username: accountDef.username,
+      nama_lengkap: row.pegawai_nama || accountDef.fallback_nama,
+      jabatan: row.pegawai_peran || accountDef.fallback_jabatan,
+      role: accountDef.role,
+      db_role: accountDef.db_role,
+      cabang_id: row.cabang_kode || accountDef.cabang_kode,
+      kode_cabang: row.cabang_kode || accountDef.cabang_kode,
+      nama_cabang: row.cabang_nama || 'Kalawa Service Pahandut',
+      kota: row.kota || 'Palangka Raya',
+    };
   }
 
   async findByUsername(username) {
-    const normalizedRole = this.normalizeRoleKey(username);
-    const sql = `
-      ${BASE_USERS_CTE}
-      WHERE LOWER(ac.username) = LOWER($1)
-         OR LOWER(ac.role) = LOWER($2)
-         OR LOWER(ac.db_role) = LOWER($1)
-         OR LOWER(p.pegawai_id) = LOWER($1)
-      ORDER BY ac.sort_order ASC
-      LIMIT 1;
-    `;
-    const { rows } = await db.query(sql, [username, normalizedRole]);
-    return rows[0] || null;
+    const clean = String(username || '').trim().toLowerCase();
+    const found = KELOMPOK1_PG_ACCOUNTS.find(
+      (acc) =>
+        acc.username.toLowerCase() === clean ||
+        acc.role.toLowerCase() === clean ||
+        acc.db_role.toLowerCase() === clean
+    );
+    if (!found) return null;
+    return await this.hydrateAccountMetadata(found);
   }
 
   async findByRole(role) {
-    const normalizedRole = this.normalizeRoleKey(role);
-    const sql = `
-      ${BASE_USERS_CTE}
-      WHERE ac.role = $1 OR ac.db_role = $2 OR ac.username = $2
-      ORDER BY ac.sort_order ASC
-      LIMIT 1;
-    `;
-    const { rows } = await db.query(sql, [normalizedRole, role]);
-    return rows[0] || null;
+    return await this.findByUsername(role);
   }
 
-  async findAllActiveDemoUsers() {
-    const sql = `
-      ${BASE_USERS_CTE}
-      ORDER BY ac.sort_order ASC;
-    `;
-    const { rows } = await db.query(sql);
-    return rows.map(({ password_hash, ...user }) => ({
-      ...user,
-      default_password: password_hash,
-    }));
+  async getAllDemoUsers() {
+    const results = await Promise.all(
+      KELOMPOK1_PG_ACCOUNTS.map((acc) => this.hydrateAccountMetadata(acc))
+    );
+    return results.filter(Boolean);
   }
 }
 

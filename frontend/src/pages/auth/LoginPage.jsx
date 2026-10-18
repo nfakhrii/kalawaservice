@@ -24,10 +24,16 @@ export default function LoginPage() {
     }
   };
 
-  const handleQuickRoleSelect = async (roleKey) => {
+  const handleQuickRoleSelect = async (item) => {
     setError(null);
+    setUsername(item.username);
+    setPassword(item.defaultPassword);
     try {
-      await quickSwitchRole(roleKey);
+      if (user) {
+        await quickSwitchRole(item.role);
+      } else {
+        await login(item.username, item.defaultPassword);
+      }
       navigate('/app/overview');
     } catch (err) {
       setError(err.message);
@@ -153,7 +159,7 @@ export default function LoginPage() {
                   />
                 </div>
                 <p className="text-[11px] text-[#656d76] mt-1">
-                  Mendukung password asli <code className="font-mono bg-slate-100 px-1 rounded">*Kalawa123</code> dari <code className="font-mono">Kelompok1_admin_security.sql</code> maupun <code className="font-mono bg-slate-100 px-1 rounded">kalawa123</code>.
+                  Diverifikasi langsung ke engine PostgreSQL (<code className="font-mono">pg_authid</code>) sesuai password asli <code className="font-mono bg-slate-100 px-1 rounded">*Kalawa123</code> di <code className="font-mono">Kelompok1_admin_security.sql</code>.
                 </p>
               </div>
 
@@ -162,7 +168,7 @@ export default function LoginPage() {
                 disabled={loading}
                 className="w-full py-2 px-4 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white transition-colors cursor-pointer disabled:opacity-50"
               >
-                {loading ? 'Memverifikasi JWT...' : 'Sign in to Workspace'}
+                {loading ? 'Memverifikasi Akun PostgreSQL...' : 'Sign in to Workspace'}
               </button>
             </form>
 
@@ -226,7 +232,7 @@ export default function LoginPage() {
                     <button
                       type="button"
                       disabled={loading}
-                      onClick={() => handleQuickRoleSelect(item.role)}
+                      onClick={() => handleQuickRoleSelect(item)}
                       className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
                         isCurrent
                           ? 'bg-[#0969da] text-white border-[#0969da]'

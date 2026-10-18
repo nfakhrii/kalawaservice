@@ -2,17 +2,35 @@ const db = require('../config/db');
 const AppError = require('../utils/AppError');
 
 class CorporateRepository {
+  getRoleFlags() {
+    const user = db.getCurrentUserContext();
+    const role = user?.role || 'admin_cabang';
+    return {
+      role,
+      isRestrictedCustomer: ['kasir', 'mekanik', 'gudang', 'auditor'].includes(role),
+      isRestrictedWo: ['mekanik', 'gudang', 'auditor'].includes(role),
+    };
+  }
+
   // ==========================================================================
   // 1. "KONTRAK_KORPORAT" & MONITORING PLAFON KREDIT "PELANGGAN"
   // ==========================================================================
   async getCorporateContractsAndFleets() {
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+    const npwpSelect = isRestrictedCustomer
+      ? `'***REDACTED***'::VARCHAR AS npwp`
+      : `p.pelanggan_no_identitas AS npwp`;
+    const npwpGroupBy = isRestrictedCustomer ? '' : ', p.pelanggan_no_identitas';
+
     const monitoringSql = `
       SELECT
         p.pelanggan_id,
         p.pelanggan_id AS kode_pelanggan,
         p.pelanggan_nama AS nama_pelanggan,
         p.pelanggan_nama AS nama_perusahaan,
-        p.pelanggan_no_identitas AS npwp,
+        ${npwpSelect},
         p.pelanggan_nama AS pic_nama,
         p.pelanggan_telp AS telepon,
         kk.kontrak_id,
@@ -33,16 +51,16 @@ class CorporateRepository {
         END AS persentase_utilisasi,
         COUNT(DISTINCT m.motor_nopol) AS jumlah_unit_armada,
         COUNT(DISTINCT wo.work_no) AS total_wo_korporat,
-        COUNT(DISTINCT tk.tagihan_id) FILTER (WHERE tk.status_tagihan = 'Belum Dibayar') AS tagihan_outstanding_count
-      FROM "PELANGGAN" p
+        COUNT(DISTINCT tk.tagihan_id) FILTER (WHERE tk.status_tagihan IN ('Belum Dibayar', 'Belum Lunas')) AS tagihan_outstanding_count
+      FROM ${customerSource} p
       LEFT JOIN "KONTRAK_KORPORAT" kk
         ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
       LEFT JOIN "MOTOR" m ON m.pelanggan_id = p.pelanggan_id
-      LEFT JOIN "WORK_ORDER" wo ON wo.motor_nopol = m.motor_nopol
+      LEFT JOIN ${woSource} wo ON wo.motor_nopol = m.motor_nopol
       LEFT JOIN "TAGIHAN_KOLEKTIF" tk ON tk.pelanggan_id = p.pelanggan_id
       WHERE p.pelanggan_tipe = 'Korporat'
       GROUP BY
-        p.pelanggan_id, p.pelanggan_nama, p.pelanggan_no_identitas,
+        p.pelanggan_id, p.pelanggan_nama${npwpGroupBy},
         p.pelanggan_telp, kk.kontrak_id, kk.status_kontrak,
         kk.diskon_kontrak_persen, kk.kuota_motor, p.plafon_kredit, p.sisa_plafon
       ORDER BY p.pelanggan_id ASC;
@@ -69,7 +87,7 @@ class CorporateRepository {
         p.pelanggan_id AS kode_pelanggan,
         p.pelanggan_nama AS nama_perusahaan,
         p.pelanggan_nama AS nama_pelanggan,
-        p.pelanggan_no_identitas AS npwp,
+        ${npwpSelect},
         p.pelanggan_nama AS pic_nama,
         p.pelanggan_telp AS telepon,
         p.plafon_kredit,
@@ -83,12 +101,12 @@ class CorporateRepository {
         ) AS jumlah_armada,
         (
           SELECT COUNT(*)
-          FROM "WORK_ORDER" wo
+          FROM ${woSource} wo
           JOIN "MOTOR" m2 ON m2.motor_nopol = wo.motor_nopol
           WHERE m2.pelanggan_id = p.pelanggan_id
         ) AS total_wo_kontrak
       FROM "KONTRAK_KORPORAT" kk
-      JOIN "PELANGGAN" p ON p.pelanggan_id = kk.pelanggan_id
+      JOIN ${customerSource} p ON p.pelanggan_id = kk.pelanggan_id
       LEFT JOIN "CABANG" c ON c.cabang_kode = p.pelanggan_cab_favorit
       ORDER BY kk.kontrak_id ASC;
     `;
@@ -113,10 +131,10 @@ class CorporateRepository {
         kk.kontrak_id,
         kk.kontrak_id AS nomor_kontrak,
         'ARMADA_KORPORAT'::VARCHAR AS jenis_armada,
-        (SELECT COUNT(*) FROM "WORK_ORDER" wo WHERE wo.motor_nopol = m.motor_nopol) AS jumlah_servis,
-        (SELECT MAX(wo.work_tgl_masuk) FROM "WORK_ORDER" wo WHERE wo.motor_nopol = m.motor_nopol) AS servis_terakhir
+        (SELECT COUNT(*) FROM ${woSource} wo WHERE wo.motor_nopol = m.motor_nopol) AS jumlah_servis,
+        (SELECT MAX(wo.work_tgl_masuk) FROM ${woSource} wo WHERE wo.motor_nopol = m.motor_nopol) AS servis_terakhir
       FROM "MOTOR" m
-      JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+      JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
       LEFT JOIN "KONTRAK_KORPORAT" kk
         ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
       WHERE p.pelanggan_tipe = 'Korporat'
@@ -226,6 +244,17 @@ class CorporateRepository {
   // 2. "TAGIHAN_KOLEKTIF" AKHIR BULAN (COLLECTIVE BILLING)
   // ==========================================================================
   async getCollectiveBillings() {
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+    const npwpSelect = isRestrictedCustomer
+      ? `'***REDACTED***'::VARCHAR AS npwp`
+      : `p.pelanggan_no_identitas AS npwp`;
+    const diskonSelect = isRestrictedWo ? `0::INT AS diskon` : `wo.pembayaran_diskon AS diskon`;
+    const woPaymentSelect = isRestrictedWo
+      ? `'REDACTED'::VARCHAR AS pembayaran_status, 'Tagihan Kolektif'::VARCHAR AS skema_pembayaran`
+      : `wo.pembayaran_status, wo.pembayaran_metode AS skema_pembayaran`;
+
     const invoicesSql = `
       SELECT
         tk.tagihan_id AS id,
@@ -251,20 +280,20 @@ class CorporateRepository {
         ('REF-' || tk.tagihan_id) AS referensi_pembayaran,
         (
           SELECT COUNT(*)
-          FROM "WORK_ORDER" wo
+          FROM ${woSource} wo
           WHERE wo.tagihan_id = tk.tagihan_id
         ) AS total_wo,
         p.pelanggan_id AS kode_pelanggan,
         p.pelanggan_nama AS nama_perusahaan,
         p.pelanggan_nama AS nama_pelanggan,
-        p.pelanggan_no_identitas AS npwp,
+        ${npwpSelect},
         p.pelanggan_nama AS pic_nama,
         p.plafon_kredit,
         p.sisa_plafon,
         kk.kontrak_id AS nomor_kontrak,
         ('Kontrak Armada ' || p.pelanggan_nama) AS nama_kontrak
       FROM "TAGIHAN_KOLEKTIF" tk
-      JOIN "PELANGGAN" p ON p.pelanggan_id = tk.pelanggan_id
+      JOIN ${customerSource} p ON p.pelanggan_id = tk.pelanggan_id
       LEFT JOIN "KONTRAK_KORPORAT" kk
         ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
       ORDER BY tk.tagihan_id DESC;
@@ -298,12 +327,12 @@ class CorporateRepository {
           ),
           0
         ) AS total_biaya_part,
-        wo.pembayaran_diskon AS diskon,
+        ${diskonSelect},
         fn_hitung_total_tagihan(wo.work_no) AS nominal_wo,
         m.motor_nopol AS motor_id,
         m.motor_nopol AS plat_nomor,
         (m.motor_merek || ' ' || m.motor_tipe) AS kendaraan
-      FROM "WORK_ORDER" wo
+      FROM ${woSource} wo
       JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
       WHERE wo.tagihan_id IS NOT NULL
       ORDER BY wo.work_no ASC;
@@ -316,8 +345,7 @@ class CorporateRepository {
         wo.work_no AS nomor_wo,
         LOWER(wo.work_status) AS status,
         wo.work_status,
-        wo.pembayaran_status,
-        wo.pembayaran_metode AS skema_pembayaran,
+        ${woPaymentSelect},
         wo.work_tgl_masuk AS waktu_masuk,
         wo.work_tgl_selesai AS waktu_selesai,
         wo.work_keluhan AS keluhan,
@@ -338,7 +366,7 @@ class CorporateRepository {
           ),
           0
         ) AS total_biaya_part,
-        wo.pembayaran_diskon AS diskon,
+        ${diskonSelect},
         fn_hitung_total_tagihan(wo.work_no) AS total_tagihan,
         m.motor_nopol AS motor_id,
         m.motor_nopol AS plat_nomor,
@@ -349,9 +377,9 @@ class CorporateRepository {
         p.sisa_plafon,
         kk.kontrak_id,
         kk.kontrak_id AS nomor_kontrak
-      FROM "WORK_ORDER" wo
+      FROM ${woSource} wo
       JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
-      JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+      JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
       LEFT JOIN "KONTRAK_KORPORAT" kk
         ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
       WHERE p.pelanggan_tipe = 'Korporat'
@@ -391,10 +419,7 @@ class CorporateRepository {
    * (yang otomatis memicu trigger trg_potong_plafon_korporat untuk memotong sisa_plafon).
    */
   async createCollectiveInvoice(data, _user) {
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-
+    return await db.withTransaction(async (client) => {
       const pelangganId = String(data.pelanggan_id).trim();
       const periodeBulanNum = Number(data.periode_bulan || 9);
       const periodeTahunNum = Number(data.periode_tahun || 2026);
@@ -471,7 +496,6 @@ class CorporateRepository {
 
       const createdInvoice = invRows[0];
 
-      // Kaitkan semua WO korporat ke tagihan_id ini -> memicu trg_potong_plafon_korporat
       for (const wo of woList) {
         await client.query(
           `
@@ -485,17 +509,11 @@ class CorporateRepository {
         );
       }
 
-      await client.query('COMMIT');
       return {
         ...createdInvoice,
         total_wo: woList.length,
       };
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /**
@@ -505,10 +523,7 @@ class CorporateRepository {
    */
   async settleCollectiveInvoice(tagihanId, _data) {
     const tkId = String(tagihanId).trim();
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-
+    return await db.withTransaction(async (client) => {
       const checkRes = await client.query(
         `SELECT * FROM "TAGIHAN_KOLEKTIF" WHERE UPPER(tagihan_id) = UPPER($1) FOR UPDATE`,
         [tkId]
@@ -546,14 +561,8 @@ class CorporateRepository {
         [checkRes.rows[0].tagihan_id]
       );
 
-      await client.query('COMMIT');
       return rows[0];
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    });
   }
 }
 

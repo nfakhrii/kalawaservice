@@ -1,12 +1,26 @@
 const db = require('../config/db');
 
 class AnalyticsRepository {
+  getRoleFlags() {
+    const user = db.getCurrentUserContext();
+    const role = user?.role || 'admin_cabang';
+    return {
+      role,
+      isRestrictedCustomer: ['kasir', 'mekanik', 'gudang', 'auditor'].includes(role),
+      isRestrictedWo: ['mekanik', 'gudang', 'auditor'].includes(role),
+    };
+  }
+
   // ==========================================================================
   // 1. LAPORAN JOIN RIWAYAT SERVIS PER MOTOR (/app/analytics/vehicle-history)
   //    Menggunakan Stored Function asli Kelompok 1: sp_riwayat_servis(motor_nopol)
-  //    JOIN "WORK_ORDER", "MOTOR", "PELANGGAN", "CABANG", "MEKANIK", "WO_JASA", "WO_SUKU_CADANG"
+  //    JOIN "WORK_ORDER"/"VW_WORK_ORDER_AMAN", "MOTOR", "PELANGGAN"/"VW_PELANGGAN_AMAN", "CABANG", "MEKANIK", "WO_JASA", "WO_SUKU_CADANG"
   // ==========================================================================
   async getVehicleHistoryReport(filters = {}) {
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+
     const params = [];
     const conditions = [];
 
@@ -32,25 +46,47 @@ class AnalyticsRepository {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    const paymentColumnsSql = isRestrictedWo
+      ? `
+        CASE
+          WHEN sr.status = 'Dibatalkan' THEN 'dibatalkan'
+          WHEN sr.status = 'Dibayar' THEN 'dibayar'
+          WHEN sr.status = 'Selesai' THEN 'selesai'
+          WHEN sr.status IN ('Diproses', 'Dikerjakan') THEN 'dikerjakan'
+          ELSE 'antre'
+        END AS status_wo,
+        sr.status AS work_status,
+        'REDACTED'::VARCHAR AS pembayaran_status,
+        CASE
+          WHEN p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
+          ELSE 'LANGSUNG'
+        END AS skema_pembayaran,
+        0::INT AS diskon,
+      `
+      : `
+        CASE
+          WHEN sr.status = 'Dibatalkan' THEN 'dibatalkan'
+          WHEN wo.pembayaran_status = 'Lunas' OR sr.status = 'Dibayar' THEN 'dibayar'
+          WHEN sr.status = 'Selesai' THEN 'selesai'
+          WHEN sr.status IN ('Diproses', 'Dikerjakan') THEN 'dikerjakan'
+          ELSE 'antre'
+        END AS status_wo,
+        sr.status AS work_status,
+        wo.pembayaran_status,
+        CASE
+          WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
+          ELSE 'LANGSUNG'
+        END AS skema_pembayaran,
+        wo.pembayaran_diskon AS diskon,
+      `;
+
     const baseCte = `
       WITH riwayat_cte AS (
         SELECT
           sr.work_no AS work_order_id,
           sr.work_no,
           sr.work_no AS nomor_wo,
-          CASE
-            WHEN sr.status = 'Dibatalkan' THEN 'dibatalkan'
-            WHEN wo.pembayaran_status = 'Lunas' OR sr.status = 'Dibayar' THEN 'dibayar'
-            WHEN sr.status = 'Selesai' THEN 'selesai'
-            WHEN sr.status IN ('Diproses', 'Dikerjakan') THEN 'dikerjakan'
-            ELSE 'antre'
-          END AS status_wo,
-          sr.status AS work_status,
-          wo.pembayaran_status,
-          CASE
-            WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
-            ELSE 'LANGSUNG'
-          END AS skema_pembayaran,
+          ${paymentColumnsSql}
           sr.tgl_masuk AS waktu_masuk,
           sr.tgl_selesai AS waktu_selesai,
           m.motor_kilometer AS kilometer_masuk,
@@ -73,7 +109,6 @@ class AnalyticsRepository {
             ),
             0
           ) AS total_biaya_part,
-          wo.pembayaran_diskon AS diskon,
           fn_hitung_total_tagihan(sr.work_no) AS total_tagihan,
           fn_status_garansi_by_wo(sr.work_no) AS status_garansi,
           m.motor_nopol AS motor_id,
@@ -112,8 +147,8 @@ class AnalyticsRepository {
           ) AS daftar_part
         FROM "MOTOR" m
         CROSS JOIN LATERAL sp_riwayat_servis(m.motor_nopol) sr
-        JOIN "WORK_ORDER" wo ON wo.work_no = sr.work_no
-        JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+        JOIN ${woSource} wo ON wo.work_no = sr.work_no
+        JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
         JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
         LEFT JOIN "MEKANIK" mk ON mk.mekanik_id = wo.mekanik_id
         LEFT JOIN "PEGAWAI" pg_mek ON pg_mek.pegawai_id = mk.mekanik_id
@@ -152,18 +187,50 @@ class AnalyticsRepository {
 
   // ==========================================================================
   // 2. LAPORAN JOIN PENDAPATAN PER CABANG & RENTANG TANGGAL (/app/analytics/branch-revenue)
-  //    JOIN "CABANG" & "WORK_ORDER" (+ sp_daftar_wo_cabang & fn_hitung_total_tagihan)
+  //    JOIN "CABANG" & "WORK_ORDER"/"VW_WORK_ORDER_AMAN" (+ sp_daftar_wo_cabang & fn_hitung_total_tagihan)
   //    Skenario Debugging #5: Wajib menggunakan COALESCE(SUM(...), 0) dan
   //    mengembalikan HTTP 200 OK dengan data: [] dan total_pendapatan: 0
   //    ketika rentang tanggal kosong!
   // ==========================================================================
   async getBranchRevenueReport({ startDate, endDate, cabangId }) {
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+
     const params = [startDate, endDate];
     let branchFilter = '';
     if (cabangId) {
       params.push(String(cabangId).trim().toUpperCase());
       branchFilter = `AND wo.cabang_kode = $3`;
     }
+
+    const paymentColumnsSql = isRestrictedWo
+      ? `
+        'TUNAI'::VARCHAR AS metode_pembayaran,
+        'Tunai'::VARCHAR AS pembayaran_metode,
+        'LUNAS'::VARCHAR AS status_pembayaran,
+        'Lunas'::VARCHAR AS pembayaran_status,
+        CASE
+          WHEN p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
+          ELSE 'LANGSUNG'
+        END AS skema_pembayaran,
+        0::INT AS diskon,
+      `
+      : `
+        UPPER(COALESCE(wo.pembayaran_metode, 'TUNAI')) AS metode_pembayaran,
+        wo.pembayaran_metode,
+        UPPER(wo.pembayaran_status) AS status_pembayaran,
+        wo.pembayaran_status,
+        CASE
+          WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
+          ELSE 'LANGSUNG'
+        END AS skema_pembayaran,
+        wo.pembayaran_diskon AS diskon,
+      `;
+
+    const statusConditionSql = isRestrictedWo
+      ? `wo.work_status IN ('Selesai', 'Dibayar')`
+      : `(wo.pembayaran_status = 'Lunas' OR wo.work_status IN ('Selesai', 'Dibayar'))`;
 
     const baseTransactionsCte = `
       WITH tx_cte AS (
@@ -173,17 +240,10 @@ class AnalyticsRepository {
           ('KWT-' || wo.work_no) AS nomor_kwitansi,
           COALESCE(wo.work_tgl_selesai, wo.work_tgl_masuk) AS tanggal_bayar,
           DATE(wo.work_tgl_masuk) AS tanggal_transaksi,
-          UPPER(COALESCE(wo.pembayaran_metode, 'TUNAI')) AS metode_pembayaran,
-          wo.pembayaran_metode,
-          UPPER(wo.pembayaran_status) AS status_pembayaran,
-          wo.pembayaran_status,
+          ${paymentColumnsSql}
           fn_hitung_total_tagihan(wo.work_no) AS jumlah_bayar,
           wo.work_no AS work_order_id,
           wo.work_no AS nomor_wo,
-          CASE
-            WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
-            ELSE 'LANGSUNG'
-          END AS skema_pembayaran,
           COALESCE(
             (
               SELECT SUM(js.jasa_biaya)
@@ -201,7 +261,6 @@ class AnalyticsRepository {
             ),
             0
           ) AS total_biaya_part,
-          wo.pembayaran_diskon AS diskon,
           c.cabang_kode AS cabang_id,
           c.cabang_kode,
           c.cabang_kode AS kode_cabang,
@@ -212,12 +271,12 @@ class AnalyticsRepository {
           UPPER(p.pelanggan_tipe) AS tipe_pelanggan,
           CASE WHEN p.pelanggan_tipe = 'Korporat' THEN p.pelanggan_nama ELSE NULL END AS nama_perusahaan,
           m.motor_nopol AS plat_nomor
-        FROM "WORK_ORDER" wo
+        FROM ${woSource} wo
         JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
         JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
-        JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+        JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
         WHERE wo.work_status <> 'Dibatalkan'
-          AND (wo.pembayaran_status = 'Lunas' OR wo.work_status IN ('Selesai', 'Dibayar'))
+          AND ${statusConditionSql}
           AND DATE(wo.work_tgl_masuk) BETWEEN $1::DATE AND $2::DATE
           ${branchFilter}
       )
@@ -290,9 +349,13 @@ class AnalyticsRepository {
 
   // ==========================================================================
   // 3. LAPORAN JOIN PENGGUNAAN SUKU CADANG PER WORK ORDER (/app/analytics/sparepart-usage)
-  //    JOIN "WO_SUKU_CADANG", "SUKU_CADANG", "WORK_ORDER", "MOTOR", "CABANG"
+  //    JOIN "WO_SUKU_CADANG", "SUKU_CADANG", "WORK_ORDER"/"VW_WORK_ORDER_AMAN", "MOTOR", "CABANG"
   // ==========================================================================
   async getSparepartUsageReport(filters = {}) {
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+
     const params = [];
     const conditions = [];
 
@@ -308,6 +371,9 @@ class AnalyticsRepository {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const statusWoSql = isRestrictedWo
+      ? `LOWER(wo.work_status) AS status_wo`
+      : `CASE WHEN wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar' THEN 'dibayar' ELSE LOWER(wo.work_status) END AS status_wo`;
 
     const baseCte = `
       WITH usage_cte AS (
@@ -317,10 +383,7 @@ class AnalyticsRepository {
           wo.work_no,
           wo.work_no AS nomor_wo,
           wo.work_tgl_masuk AS waktu_masuk,
-          CASE
-            WHEN wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar' THEN 'dibayar'
-            ELSE LOWER(wo.work_status)
-          END AS status_wo,
+          ${statusWoSql},
           wo.work_status,
           c.cabang_kode AS kode_cabang,
           c.cabang_kode,
@@ -346,11 +409,11 @@ class AnalyticsRepository {
           wsc.suku_cadang_jumlah,
           COALESCE(st.stok_qty, 0) AS sisa_stok_gudang
         FROM "WO_SUKU_CADANG" wsc
-        JOIN "WORK_ORDER" wo ON wo.work_no = wsc.work_no
+        JOIN ${woSource} wo ON wo.work_no = wsc.work_no
         JOIN "SUKU_CADANG" sc ON sc.suku_cadang_kode = wsc.suku_cadang_kode
         JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
         JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
-        JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+        JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
         LEFT JOIN "STOK_CABANG" st
           ON st.suku_cadang_kode = wsc.suku_cadang_kode AND st.cabang_kode = wo.cabang_kode
         ${whereClause}

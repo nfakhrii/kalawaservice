@@ -6,13 +6,21 @@ const AppError = require('./utils/AppError');
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Standard Middlewares
+app.use(
+  cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
+app.use(express.json({ limit: '5mb' }));
 
+// Mount All Modular API Routes (/api and /api/v1 alias)
 app.use('/api', apiRoutes);
+app.use('/api/v1', apiRoutes);
 
-// 404 Route Handler
+// 404 Route Fallback
 app.use((req, _res, next) => {
   next(
     new AppError(
@@ -23,8 +31,7 @@ app.use((req, _res, next) => {
   );
 });
 
-// Global Defensive Error Handler
+// Centralized Error Handling Middleware
 app.use(errorHandler);
 
 module.exports = app;
-

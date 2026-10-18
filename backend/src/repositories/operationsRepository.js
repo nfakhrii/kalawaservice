@@ -1,69 +1,95 @@
 const db = require('../config/db');
 const AppError = require('../utils/AppError');
 
+const UI_TO_DB_STATUS = {
+  antre: ['Dibuat', 'Antre'],
+  dikerjakan: ['Diproses', 'Dikerjakan'],
+  selesai: ['Selesai'],
+  dibayar: ['Dibayar'],
+  dibatalkan: ['Dibatalkan'],
+};
+
+function mapUiStatusToSingleDbStatus(rawStatus) {
+  if (!rawStatus) return null;
+  const s = String(rawStatus).trim();
+  const lower = s.toLowerCase();
+  if (lower === 'antre' || lower === 'dibuat') return 'Antre';
+  if (lower === 'dikerjakan' || lower === 'diproses') return 'Dikerjakan';
+  if (lower === 'selesai') return 'Selesai';
+  if (lower === 'dibayar' || lower === 'sudah dibayar' || lower === 'lunas') return 'Dibayar';
+  if (lower === 'dibatalkan') return 'Dibatalkan';
+  return s;
+}
+
 class OperationsRepository {
-  normalizeStatusFilter(statusFilter) {
-    if (!statusFilter) return null;
-    const s = String(statusFilter).trim().toLowerCase();
-    if (
-      [
-        'antre',
-        'dibuat',
-        'dikerjakan',
-        'diproses',
-        'selesai',
-        'dibayar',
-        'dibatalkan',
-        'lunas',
-        'belum lunas',
-      ].includes(s)
-    ) {
-      return s;
-    }
-    return null;
+  getRoleFlags() {
+    const user = db.getCurrentUserContext();
+    const role = user?.role || 'admin_cabang';
+    return {
+      role,
+      isRestrictedCustomer: ['kasir', 'mekanik', 'gudang', 'auditor'].includes(role),
+      isRestrictedWo: ['mekanik', 'gudang', 'auditor'].includes(role),
+      isMekanik: role === 'mekanik',
+    };
   }
 
-  async getAllWorkOrders(statusFilter = null) {
-    const normalized = this.normalizeStatusFilter(statusFilter);
-    let whereClause = '';
+  // ==========================================================================
+  // 1. WORK ORDER ("WORK_ORDER" / "VW_WORK_ORDER_AMAN", "WO_JASA", "WO_SUKU_CADANG", "WO_MEKANIK", "GARANSI")
+  // ==========================================================================
+  async getAllWorkOrders(statusFilter = null, cabangKode = null) {
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
 
-    if (normalized === 'antre' || normalized === 'dibuat') {
-      whereClause = `WHERE wo.work_status IN ('Dibuat', 'Antre')`;
-    } else if (normalized === 'dikerjakan' || normalized === 'diproses') {
-      whereClause = `WHERE wo.work_status IN ('Diproses', 'Dikerjakan')`;
-    } else if (normalized === 'selesai' || normalized === 'belum lunas') {
-      whereClause = `WHERE wo.work_status = 'Selesai' AND wo.pembayaran_status = 'Belum Lunas'`;
-    } else if (normalized === 'dibayar' || normalized === 'lunas') {
-      whereClause = `WHERE wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar'`;
-    } else if (normalized === 'dibatalkan') {
-      whereClause = `WHERE wo.work_status = 'Dibatalkan'`;
+    const params = [];
+    const conditions = [];
+
+    if (statusFilter && statusFilter !== 'all') {
+      const lower = String(statusFilter).toLowerCase();
+      if (lower === 'dibayar' && !isRestrictedWo) {
+        conditions.push(`(wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar')`);
+      } else if (UI_TO_DB_STATUS[lower]) {
+        const list = UI_TO_DB_STATUS[lower];
+        params.push(list);
+        if (lower === 'selesai' && !isRestrictedWo) {
+          conditions.push(`(wo.work_status = ANY($${params.length}) AND wo.pembayaran_status = 'Belum Lunas')`);
+        } else {
+          conditions.push(`wo.work_status = ANY($${params.length})`);
+        }
+      } else {
+        params.push(statusFilter);
+        conditions.push(`wo.work_status = $${params.length}`);
+      }
     }
 
-    const sql = `
-      SELECT
-        wo.work_no AS id,
-        wo.work_no,
-        wo.work_no AS nomor_wo,
-        wo.motor_nopol AS motor_id,
-        wo.motor_nopol,
-        wo.motor_nopol AS plat_nomor,
-        wo.cabang_kode AS cabang_id,
-        wo.cabang_kode,
-        wo.cabang_kode AS kode_cabang,
-        c.cabang_nama AS nama_cabang,
-        c.cabang_nama,
-        wo.mekanik_id,
-        COALESCE(pg_mek.pegawai_nama, '-') AS nama_mekanik,
-        'Budi Santoso'::VARCHAR AS nama_kasir,
-        wo.work_tgl_masuk AS waktu_masuk,
-        wo.work_tgl_masuk,
-        wo.work_tgl_selesai AS waktu_selesai,
-        wo.work_tgl_selesai,
-        m.motor_kilometer AS kilometer_masuk,
-        m.motor_kilometer,
-        wo.work_keluhan AS keluhan,
-        wo.work_keluhan,
+    if (cabangKode) {
+      params.push(String(cabangKode).trim().toUpperCase());
+      conditions.push(`wo.cabang_kode = $${params.length}`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const paymentColumnsSql = isRestrictedWo
+      ? `
+        CASE
+          WHEN wo.work_status = 'Dibatalkan' THEN 'dibatalkan'
+          WHEN wo.work_status = 'Dibayar' THEN 'dibayar'
+          WHEN wo.work_status = 'Selesai' THEN 'selesai'
+          WHEN wo.work_status IN ('Diproses', 'Dikerjakan') THEN 'dikerjakan'
+          ELSE 'antre'
+        END AS status,
         wo.work_status,
+        'REDACTED'::VARCHAR AS pembayaran_status,
+        'REDACTED'::VARCHAR AS pembayaran_metode,
+        0::INT AS pembayaran_diskon,
+        0::INT AS diskon,
+        wo.tagihan_id,
+        CASE
+          WHEN p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
+          ELSE 'LANGSUNG'
+        END AS skema_pembayaran,
+      `
+      : `
         CASE
           WHEN wo.work_status = 'Dibatalkan' THEN 'dibatalkan'
           WHEN wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar' THEN 'dibayar'
@@ -71,17 +97,32 @@ class OperationsRepository {
           WHEN wo.work_status IN ('Diproses', 'Dikerjakan') THEN 'dikerjakan'
           ELSE 'antre'
         END AS status,
-        wo.pembayaran_diskon AS diskon,
-        wo.pembayaran_diskon,
-        wo.pembayaran_metode,
-        UPPER(COALESCE(wo.pembayaran_metode, 'TUNAI')) AS metode_pembayaran,
+        wo.work_status,
         wo.pembayaran_status,
-        UPPER(wo.pembayaran_status) AS status_pembayaran,
+        wo.pembayaran_metode,
+        wo.pembayaran_diskon,
+        wo.pembayaran_diskon AS diskon,
+        wo.tagihan_id,
         CASE
           WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
           ELSE 'LANGSUNG'
         END AS skema_pembayaran,
-        wo.tagihan_id,
+      `;
+
+    const sql = `
+      SELECT
+        wo.work_no AS id,
+        wo.work_no,
+        wo.work_no AS nomor_wo,
+        ${paymentColumnsSql}
+        wo.work_tgl_masuk AS waktu_masuk,
+        wo.work_tgl_masuk,
+        wo.work_tgl_selesai AS waktu_selesai,
+        wo.work_tgl_selesai,
+        m.motor_kilometer AS kilometer_masuk,
+        wo.work_keluhan AS keluhan,
+        wo.work_keluhan,
+        NULL::TEXT AS catatan_mekanik,
         COALESCE(
           (
             SELECT SUM(js.jasa_biaya)
@@ -101,84 +142,83 @@ class OperationsRepository {
         ) AS total_biaya_part,
         fn_hitung_total_tagihan(wo.work_no) AS total_tagihan,
         fn_status_garansi_by_wo(wo.work_no) AS status_garansi,
+        m.motor_nopol AS motor_id,
+        m.motor_nopol,
+        m.motor_nopol AS plat_nomor,
         m.motor_merek AS merk,
+        m.motor_merek AS motor_merk,
         m.motor_merek,
         m.motor_tipe AS tipe_motor,
+        m.motor_tipe,
         m.motor_tahun AS tahun_motor,
+        m.motor_warna AS warna_motor,
         p.pelanggan_id,
         p.pelanggan_id AS kode_pelanggan,
         p.pelanggan_nama AS nama_pelanggan,
         p.pelanggan_nama,
-        UPPER(p.pelanggan_tipe) AS tipe_pelanggan,
-        p.pelanggan_tipe,
+        UPPER(COALESCE(p.pelanggan_tipe, 'Individu')) AS tipe_pelanggan,
+        COALESCE(p.pelanggan_tipe, 'Individu') AS pelanggan_tipe,
         CASE WHEN p.pelanggan_tipe = 'Korporat' THEN p.pelanggan_nama ELSE NULL END AS nama_perusahaan,
-        p.plafon_kredit,
-        p.sisa_plafon,
+        COALESCE(p.plafon_kredit, 0) AS plafon_kredit,
+        COALESCE(p.sisa_plafon, 0) AS sisa_plafon,
         kk.kontrak_id,
         kk.kontrak_id AS nomor_kontrak,
-        CASE WHEN wo.pembayaran_status = 'Lunas' THEN ('KWT-' || wo.work_no) ELSE NULL END AS nomor_kwitansi,
-        (SELECT COUNT(*) FROM "WO_JASA" wj WHERE wj.work_no = wo.work_no) AS jumlah_item_jasa,
-        (SELECT COUNT(*) FROM "WO_SUKU_CADANG" wsc WHERE wsc.work_no = wo.work_no) AS jumlah_item_part
-      FROM "WORK_ORDER" wo
+        c.cabang_kode AS cabang_id,
+        c.cabang_kode,
+        c.cabang_kode AS kode_cabang,
+        c.cabang_nama AS nama_cabang,
+        c.cabang_nama,
+        wo.mekanik_id,
+        COALESCE(pg_mek.pegawai_nama, '-') AS nama_mekanik,
+        mk.mekanik_keahlian AS spesialisasi_mekanik,
+        (
+          SELECT COUNT(*) FROM "WO_JASA" wj WHERE wj.work_no = wo.work_no
+        ) AS jumlah_item_jasa,
+        (
+          SELECT COUNT(*) FROM "WO_SUKU_CADANG" wsc WHERE wsc.work_no = wo.work_no
+        ) AS jumlah_item_part
+      FROM ${woSource} wo
       JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
-      JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+      JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
+      JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
+      LEFT JOIN "MEKANIK" mk ON mk.mekanik_id = wo.mekanik_id
+      LEFT JOIN "PEGAWAI" pg_mek ON pg_mek.pegawai_id = wo.mekanik_id
       LEFT JOIN "KONTRAK_KORPORAT" kk
         ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
-      JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
-      LEFT JOIN "PEGAWAI" pg_mek ON pg_mek.pegawai_id = wo.mekanik_id
       ${whereClause}
       ORDER BY wo.work_tgl_masuk DESC, wo.work_no DESC;
     `;
-
-    const countsSql = `
-      SELECT
-        COUNT(*) AS all,
-        COUNT(*) FILTER (WHERE work_status IN ('Dibuat', 'Antre')) AS antre,
-        COUNT(*) FILTER (WHERE work_status IN ('Diproses', 'Dikerjakan')) AS dikerjakan,
-        COUNT(*) FILTER (WHERE work_status = 'Selesai' AND pembayaran_status = 'Belum Lunas') AS selesai,
-        COUNT(*) FILTER (WHERE pembayaran_status = 'Lunas' OR work_status = 'Dibayar') AS dibayar,
-        COUNT(*) FILTER (WHERE work_status = 'Dibatalkan') AS dibatalkan
-      FROM "WORK_ORDER";
-    `;
-
-    const [listRes, countsRes] = await Promise.all([db.query(sql), db.query(countsSql)]);
-    return {
-      workOrders: listRes.rows,
-      counts: countsRes.rows[0],
-    };
+    const { rows } = await db.query(sql, params);
+    return rows;
   }
 
-  async getWorkOrderById(idOrNomor) {
-    const paramValue = String(idOrNomor).trim();
+  async getWorkOrderDetail(woId) {
+    const workNo = String(woId).trim().toUpperCase();
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
 
-    const woSql = `
-      SELECT
-        wo.work_no AS id,
-        wo.work_no,
-        wo.work_no AS nomor_wo,
-        wo.motor_nopol AS motor_id,
-        wo.motor_nopol,
-        wo.motor_nopol AS plat_nomor,
-        wo.cabang_kode AS cabang_id,
-        wo.cabang_kode,
-        wo.cabang_kode AS kode_cabang,
-        c.cabang_nama AS nama_cabang,
-        c.cabang_nama,
-        'Palangka Raya'::VARCHAR AS kota_cabang,
-        wo.mekanik_id,
-        COALESCE(pg_mek.pegawai_nama, '-') AS nama_mekanik,
-        'Budi Santoso'::VARCHAR AS nama_kasir,
-        wo.work_tgl_masuk AS waktu_masuk,
-        wo.work_tgl_masuk,
-        wo.work_tgl_selesai AS waktu_selesai,
-        wo.work_tgl_selesai,
-        m.motor_kilometer AS kilometer_masuk,
-        m.motor_kilometer AS kilometer_terakhir,
-        m.motor_kilometer,
-        wo.work_keluhan AS keluhan,
-        wo.work_keluhan,
-        NULL::TEXT AS catatan_mekanik,
+    const paymentFieldsSql = isRestrictedWo
+      ? `
+        CASE
+          WHEN wo.work_status = 'Dibatalkan' THEN 'dibatalkan'
+          WHEN wo.work_status = 'Dibayar' THEN 'dibayar'
+          WHEN wo.work_status = 'Selesai' THEN 'selesai'
+          WHEN wo.work_status IN ('Diproses', 'Dikerjakan') THEN 'dikerjakan'
+          ELSE 'antre'
+        END AS status,
         wo.work_status,
+        'REDACTED'::VARCHAR AS pembayaran_status,
+        'REDACTED'::VARCHAR AS pembayaran_metode,
+        0::INT AS pembayaran_diskon,
+        0::INT AS diskon,
+        wo.tagihan_id,
+        CASE
+          WHEN p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
+          ELSE 'LANGSUNG'
+        END AS skema_pembayaran,
+      `
+      : `
         CASE
           WHEN wo.work_status = 'Dibatalkan' THEN 'dibatalkan'
           WHEN wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar' THEN 'dibayar'
@@ -186,15 +226,36 @@ class OperationsRepository {
           WHEN wo.work_status IN ('Diproses', 'Dikerjakan') THEN 'dikerjakan'
           ELSE 'antre'
         END AS status,
-        wo.pembayaran_diskon AS diskon,
-        wo.pembayaran_diskon,
-        wo.pembayaran_metode,
+        wo.work_status,
         wo.pembayaran_status,
+        wo.pembayaran_metode,
+        wo.pembayaran_diskon,
+        wo.pembayaran_diskon AS diskon,
+        wo.tagihan_id,
         CASE
           WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
           ELSE 'LANGSUNG'
         END AS skema_pembayaran,
-        wo.tagihan_id,
+      `;
+
+    const alamatSelectSql = isRestrictedCustomer
+      ? `'***REDACTED***'::TEXT AS alamat_pelanggan`
+      : `p.pelanggan_alamat AS alamat_pelanggan`;
+
+    const headerSql = `
+      SELECT
+        wo.work_no AS id,
+        wo.work_no,
+        wo.work_no AS nomor_wo,
+        ${paymentFieldsSql}
+        wo.work_tgl_masuk AS waktu_masuk,
+        wo.work_tgl_masuk,
+        wo.work_tgl_selesai AS waktu_selesai,
+        wo.work_tgl_selesai,
+        m.motor_kilometer AS kilometer_masuk,
+        wo.work_keluhan AS keluhan,
+        wo.work_keluhan,
+        NULL::TEXT AS catatan_mekanik,
         COALESCE(
           (
             SELECT SUM(js.jasa_biaya)
@@ -212,513 +273,549 @@ class OperationsRepository {
           ),
           0
         ) AS total_biaya_part,
+        fn_hitung_total_tagihan(wo.work_no) AS total_tagihan,
         fn_status_garansi_by_wo(wo.work_no) AS status_garansi,
         g.garansi_id,
         g.garansi_jumlah_hari,
         g.garansi_keterangan,
+        m.motor_nopol AS motor_id,
+        m.motor_nopol,
+        m.motor_nopol AS plat_nomor,
         m.motor_merek AS merk,
+        m.motor_merek AS motor_merk,
         m.motor_merek,
         m.motor_tipe AS tipe_motor,
+        m.motor_tipe,
         m.motor_tahun AS tahun_motor,
         m.motor_warna AS warna_motor,
         m.motor_no_rangka AS nomor_rangka,
-        m.motor_no_rangka,
         m.motor_no_mesin AS nomor_mesin,
-        m.motor_no_mesin,
         p.pelanggan_id,
         p.pelanggan_id AS kode_pelanggan,
         p.pelanggan_nama AS nama_pelanggan,
         p.pelanggan_nama,
-        p.pelanggan_telp AS telepon_pelanggan,
-        UPPER(p.pelanggan_tipe) AS tipe_pelanggan,
-        p.pelanggan_tipe,
+        UPPER(COALESCE(p.pelanggan_tipe, 'Individu')) AS tipe_pelanggan,
+        COALESCE(p.pelanggan_tipe, 'Individu') AS pelanggan_tipe,
         CASE WHEN p.pelanggan_tipe = 'Korporat' THEN p.pelanggan_nama ELSE NULL END AS nama_perusahaan,
-        p.pelanggan_no_identitas AS npwp,
-        p.plafon_kredit,
-        p.sisa_plafon,
+        p.pelanggan_telp AS telepon_pelanggan,
+        p.pelanggan_telp AS pelanggan_no_hp,
+        '-'::VARCHAR AS email_pelanggan,
+        ${alamatSelectSql},
+        COALESCE(p.plafon_kredit, 0) AS plafon_kredit,
+        COALESCE(p.sisa_plafon, 0) AS sisa_plafon,
         kk.kontrak_id,
         kk.kontrak_id AS nomor_kontrak,
-        ('Kontrak Armada ' || p.pelanggan_nama) AS nama_kontrak,
         kk.diskon_kontrak_persen,
-        kk.kuota_motor
-      FROM "WORK_ORDER" wo
+        c.cabang_kode AS cabang_id,
+        c.cabang_kode,
+        c.cabang_kode AS kode_cabang,
+        c.cabang_nama AS nama_cabang,
+        c.cabang_alamat AS alamat_cabang,
+        c.cabang_telp AS telepon_cabang,
+        wo.mekanik_id,
+        COALESCE(pg_mek.pegawai_nama, '-') AS nama_mekanik,
+        mk.mekanik_keahlian AS spesialisasi_mekanik
+      FROM ${woSource} wo
       JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
-      JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+      JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
+      JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
+      LEFT JOIN "MEKANIK" mk ON mk.mekanik_id = wo.mekanik_id
+      LEFT JOIN "PEGAWAI" pg_mek ON pg_mek.pegawai_id = wo.mekanik_id
       LEFT JOIN "KONTRAK_KORPORAT" kk
         ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
-      JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
-      LEFT JOIN "PEGAWAI" pg_mek ON pg_mek.pegawai_id = wo.mekanik_id
       LEFT JOIN "GARANSI" g ON g.work_no = wo.work_no
-      WHERE UPPER(wo.work_no) = UPPER($1)
-      LIMIT 1;
+      WHERE UPPER(wo.work_no) = $1;
     `;
-
-    const { rows } = await db.query(woSql, [paramValue]);
-    if (!rows[0]) return null;
-
-    const wo = rows[0];
-
-    // Panggil Stored Procedure asli Kelompok 1: CALL sp_hitung_total_tagihan($1, NULL)
-    const procRes = await db.query(`CALL sp_hitung_total_tagihan($1, NULL);`, [wo.work_no]);
-    const totalTagihan = Math.max(
-      Number(procRes.rows[0] ? procRes.rows[0].p_total_tagihan : 0),
-      0
-    );
 
     const servicesSql = `
       SELECT
         wj.jasa_kode AS id,
-        wj.jasa_kode AS jasa_servis_id,
         wj.work_no,
+        wj.jasa_kode AS jasa_servis_id,
         wj.jasa_kode,
         wj.jasa_kode AS kode_jasa,
         js.jasa_uraian AS nama_jasa,
+        js.jasa_uraian AS jasa_nama,
         js.jasa_uraian,
-        'SERVIS BENGKEL'::VARCHAR AS kategori,
-        45 AS estimasi_menit,
+        'SERVIS BENGKEL'::VARCHAR AS kategori_jasa,
+        'SERVIS BENGKEL'::VARCHAR AS jasa_kategori,
         1 AS jumlah,
         js.jasa_biaya AS harga_satuan,
+        js.jasa_biaya AS subtotal,
+        js.jasa_biaya AS jasa_harga,
         js.jasa_biaya,
-        js.jasa_biaya AS subtotal
+        NULL::TEXT AS catatan
       FROM "WO_JASA" wj
       JOIN "JASA_SERVIS" js ON js.jasa_kode = wj.jasa_kode
-      WHERE wj.work_no = $1
+      WHERE UPPER(wj.work_no) = $1
       ORDER BY wj.jasa_kode ASC;
     `;
 
     const partsSql = `
       SELECT
         wsc.suku_cadang_kode AS id,
-        wsc.suku_cadang_kode AS suku_cadang_id,
         wsc.work_no,
+        wsc.suku_cadang_kode AS suku_cadang_id,
         wsc.suku_cadang_kode,
         wsc.suku_cadang_kode AS kode_sku,
         sc.suku_cadang_nama AS nama_part,
         sc.suku_cadang_nama,
         'SUKU CADANG'::VARCHAR AS kategori,
+        'SUKU CADANG'::VARCHAR AS suku_cadang_kategori,
         'PCS'::VARCHAR AS satuan,
         wsc.suku_cadang_qty AS jumlah,
         wsc.suku_cadang_qty,
         sc.suku_cadang_harga_satuan AS harga_satuan,
         sc.suku_cadang_harga_satuan,
         wsc.suku_cadang_jumlah AS subtotal,
-        wsc.suku_cadang_jumlah,
-        COALESCE(st.stok_qty, 0) AS stok_saat_ini,
-        COALESCE(st.stok_qty, 0) AS stok_qty
+        wsc.suku_cadang_jumlah
       FROM "WO_SUKU_CADANG" wsc
       JOIN "SUKU_CADANG" sc ON sc.suku_cadang_kode = wsc.suku_cadang_kode
-      LEFT JOIN "STOK_CABANG" st
-        ON st.suku_cadang_kode = wsc.suku_cadang_kode AND st.cabang_kode = $2
-      WHERE wsc.work_no = $1
+      WHERE UPPER(wsc.work_no) = $1
       ORDER BY wsc.suku_cadang_kode ASC;
     `;
 
     const mechanicsSql = `
       SELECT
-        wm.work_no,
+        wm.mekanik_id AS pegawai_id,
         wm.mekanik_id,
+        pg.pegawai_nama,
         wm.peran_mekanik,
-        p.pegawai_nama,
-        mk.mekanik_keahlian,
+        wm.peran_mekanik AS peran_pengerjaan,
+        mk.mekanik_keahlian AS spesialisasi,
         mk.mekanik_keahlian AS mekanik_spesialisasi,
-        p.pegawai_peran AS mekanik_level
+        mk.mekanik_keahlian
       FROM "WO_MEKANIK" wm
-      JOIN "PEGAWAI" p ON p.pegawai_id = wm.mekanik_id
-      JOIN "MEKANIK" mk ON mk.mekanik_id = wm.mekanik_id
-      WHERE wm.work_no = $1
-      ORDER BY CASE WHEN wm.peran_mekanik = 'Penanggung Jawab' THEN 0 ELSE 1 END, wm.mekanik_id ASC;
+      JOIN "PEGAWAI" pg ON pg.pegawai_id = wm.mekanik_id
+      LEFT JOIN "MEKANIK" mk ON mk.mekanik_id = wm.mekanik_id
+      WHERE UPPER(wm.work_no) = $1;
     `;
 
-    const [srvRes, partRes, mekRes] = await Promise.all([
-      db.query(servicesSql, [wo.work_no]),
-      db.query(partsSql, [wo.work_no, wo.cabang_kode]),
-      db.query(mechanicsSql, [wo.work_no]),
+    const [headerRes, srvRes, partRes, mekRes] = await Promise.all([
+      db.query(headerSql, [workNo]),
+      db.query(servicesSql, [workNo]),
+      db.query(partsSql, [workNo]),
+      db.query(mechanicsSql, [workNo]),
     ]);
 
-    const payment =
-      wo.pembayaran_status === 'Lunas' || wo.work_status === 'Dibayar'
-        ? {
-            id: wo.work_no,
-            work_no: wo.work_no,
-            work_order_id: wo.work_no,
-            nomor_kwitansi: `KWT-${wo.work_no}`,
-            metode_pembayaran: wo.pembayaran_metode || 'Tunai',
-            pembayaran_metode: wo.pembayaran_metode || 'Tunai',
-            status_pembayaran: wo.pembayaran_status,
-            pembayaran_status: wo.pembayaran_status,
-            pembayaran_diskon: wo.pembayaran_diskon,
-            jumlah_bayar: totalTagihan,
-            tanggal_bayar: wo.work_tgl_selesai || wo.work_tgl_masuk,
-            nama_kasir: wo.nama_kasir,
-          }
-        : null;
+    if (!headerRes.rows[0]) return null;
+
+    const header = headerRes.rows[0];
+    const isPaid = !isRestrictedWo && (header.pembayaran_status === 'Lunas' || header.work_status === 'Dibayar');
+
+    const paymentObj = isPaid
+      ? {
+          id: header.work_no,
+          work_no: header.work_no,
+          nomor_kwitansi: `KWT-${header.work_no}`,
+          work_order_id: header.work_no,
+          metode_pembayaran: (header.pembayaran_metode || 'Tunai').toUpperCase(),
+          pembayaran_metode: header.pembayaran_metode,
+          jumlah_bayar: header.total_tagihan,
+          status_pembayaran: 'LUNAS',
+          pembayaran_status: header.pembayaran_status,
+          tanggal_bayar: header.work_tgl_selesai || header.work_tgl_masuk,
+          catatan: `Pelunasan Work Order #${header.work_no}`,
+        }
+      : null;
 
     return {
-      ...wo,
-      total_tagihan: totalTagihan,
+      ...header,
       services: srvRes.rows,
       spareparts: partRes.rows,
       mechanics: mekRes.rows,
-      payment,
+      payment: paymentObj,
     };
   }
 
-  async generateNextWoNumber(client) {
-    const { rows } = await client.query(`
-      SELECT COALESCE(
-        MAX(NULLIF(REGEXP_REPLACE(work_no, '[^0-9]', '', 'g'), '')::INT),
-        13
-      ) + 1 AS next_seq
-      FROM "WORK_ORDER";
-    `);
-    const nextSeq = String(rows[0].next_seq).padStart(3, '0');
-    return `WO${nextSeq}`;
-  }
-
   /**
-   * Membuat Work Order baru dalam transaksi ACID (BEGIN ... COMMIT / ROLLBACK)
-   * Mendukung Skenario Debugging #1 (Input Work Order Tanpa Motor -> 400 Bad Request)
+   * Membuat Work Order baru di tabel "WORK_ORDER"
+   * Skenario Debugging #1: Jika motor_nopol / motor_id kosong, gagal dengan HTTP 400.
    */
   async createWorkOrder(data, user) {
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const rawWoNo = data.work_no || data.nomor_wo;
-      const workNo = rawWoNo
-        ? String(rawWoNo).trim().toUpperCase().slice(0, 15)
-        : await this.generateNextWoNumber(client);
+    return await db.withTransaction(async (client) => {
+      let workNo = data.work_no || data.nomor_wo;
+      if (!workNo) {
+        const seqRes = await client.query(`
+          SELECT COALESCE(
+            MAX(NULLIF(REGEXP_REPLACE(work_no, '[^0-9]', '', 'g'), '')::INT),
+            13
+          ) + 1 AS next_seq
+          FROM "WORK_ORDER";
+        `);
+        workNo = `WO${String(seqRes.rows[0].next_seq).padStart(3, '0')}`;
+      } else {
+        workNo = String(workNo).trim().toUpperCase();
+      }
 
       const cabangKode = String(
-        data.cabang_kode || data.cabang_id || (user && user.cabang_kode) || 'CB001'
-      ).trim();
+        data.cabang_kode || data.cabang_id || user?.kode_cabang || 'CB001'
+      )
+        .trim()
+        .toUpperCase();
 
-      const rawMotor = data.motor_nopol !== undefined ? data.motor_nopol : data.motor_id;
       const motorNopol =
-        rawMotor === undefined || rawMotor === null || String(rawMotor).trim() === ''
-          ? null
-          : String(rawMotor).trim().toUpperCase();
+        data.motor_nopol !== undefined
+          ? data.motor_nopol
+          : data.motor_id !== undefined
+          ? data.motor_id
+          : null;
 
-      const mekanikId = String(data.mekanik_id || 'PG003').trim();
-      const keluhan = data.work_keluhan || data.keluhan || 'Servis berkala & pengecekan umum';
-      const diskon = Math.round(
-        Number(data.pembayaran_diskon !== undefined ? data.pembayaran_diskon : data.diskon || 0)
-      );
+      let pelangganTipe = 'Individu';
+      let diskonKontrakRp = 0;
 
-      // Map status ke format Kelompok 1 ('Dibuat', 'Diproses', 'Antre', 'Dikerjakan', 'Selesai', 'Dibayar', 'Dibatalkan')
-      const rawStatus = String(data.work_status || data.status || 'Antre').toLowerCase();
-      let workStatus = 'Antre';
-      if (rawStatus === 'dibuat') workStatus = 'Dibuat';
-      else if (rawStatus === 'diproses') workStatus = 'Diproses';
-      else if (rawStatus === 'dikerjakan') workStatus = 'Dikerjakan';
-      else if (rawStatus === 'selesai') workStatus = 'Selesai';
-      else if (rawStatus === 'dibayar') workStatus = 'Dibayar';
-      else if (rawStatus === 'dibatalkan') workStatus = 'Dibatalkan';
+      if (motorNopol) {
+        const motorRes = await client.query(
+          `
+            SELECT
+              m.motor_nopol,
+              m.pelanggan_id,
+              p.pelanggan_tipe,
+              p.mekanik_id_pilihan,
+              kk.diskon_kontrak_persen
+            FROM "MOTOR" m
+            JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+            LEFT JOIN "KONTRAK_KORPORAT" kk
+              ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
+            WHERE UPPER(m.motor_nopol) = UPPER($1)
+          `,
+          [String(motorNopol).trim()]
+        );
 
-      const rawSkema = String(
-        data.pembayaran_metode || data.skema_pembayaran || 'Tunai'
-      ).toUpperCase();
-      let pembayaranMetode = 'Tunai';
-      if (rawSkema.includes('KORPORAT') || rawSkema.includes('PLAFON') || rawSkema.includes('KOLEKTIF')) {
-        pembayaranMetode = 'Tagihan Kolektif';
-      } else if (rawSkema.includes('QRIS')) {
-        pembayaranMetode = 'QRIS';
-      } else if (rawSkema.includes('TRANSFER')) {
-        pembayaranMetode = 'Transfer';
-      } else if (rawSkema.includes('DEBIT')) {
-        pembayaranMetode = 'Debit';
-      } else if (rawSkema.includes('KREDIT')) {
-        pembayaranMetode = 'Kredit';
+        if (!motorRes.rows[0]) {
+          throw new AppError(
+            `Data motor dengan nomor polisi '${motorNopol}' tidak ditemukan di tabel "MOTOR".`,
+            400,
+            'VEHICLE_NOT_FOUND'
+          );
+        }
+
+        pelangganTipe = motorRes.rows[0].pelanggan_tipe || 'Individu';
+        if (!data.mekanik_id && motorRes.rows[0].mekanik_id_pilihan) {
+          data.mekanik_id = motorRes.rows[0].mekanik_id_pilihan;
+        }
       }
+
+      const mekanikId = data.mekanik_id || 'PG003';
+      const keluhan = data.work_keluhan || data.keluhan;
+
+      let pembayaranMetode = data.pembayaran_metode || 'Tunai';
+      if (
+        pelangganTipe === 'Korporat' ||
+        String(data.skema_pembayaran || '').toUpperCase() === 'PLAFON_KORPORAT'
+      ) {
+        pembayaranMetode = 'Tagihan Kolektif';
+      }
+
+      const diskonNominal = Math.round(
+        Number(
+          data.pembayaran_diskon !== undefined
+            ? data.pembayaran_diskon
+            : data.diskon || diskonKontrakRp || 0
+        )
+      );
 
       const insertWoSql = `
         INSERT INTO "WORK_ORDER" (
-          work_no, work_tgl_masuk, work_tgl_selesai, work_status,
-          work_keluhan, cabang_kode, motor_nopol, mekanik_id,
-          pembayaran_diskon, pembayaran_metode, pembayaran_status
+          work_no, work_tgl_masuk, work_tgl_selesai,
+          work_status, work_keluhan, cabang_kode,
+          motor_nopol, mekanik_id, pembayaran_diskon,
+          pembayaran_metode, pembayaran_status, tagihan_id
         ) VALUES (
-          $1, CURRENT_TIMESTAMP, NULL, $2,
-          $3, $4, $5, $6,
-          $7, $8, 'Belum Lunas'
+          $1, CURRENT_TIMESTAMP, NULL,
+          'Antre', $2, $3,
+          $4, $5, $6,
+          $7, 'Belum Lunas', NULL
         )
-        RETURNING *;
+        RETURNING work_no;
       `;
 
-      const { rows: woRows } = await client.query(insertWoSql, [
+      const { rows } = await client.query(insertWoSql, [
         workNo,
-        workStatus,
         keluhan,
         cabangKode,
-        motorNopol,
+        motorNopol ? String(motorNopol).trim().toUpperCase() : null,
         mekanikId,
-        diskon,
+        diskonNominal,
         pembayaranMetode,
       ]);
 
-      const createdWo = woRows[0];
-
-      // Update motor_kilometer jika dikirim
-      const kmMasuk = Number(data.motor_kilometer || data.kilometer_masuk || 0);
-      if (createdWo.motor_nopol && kmMasuk > 0) {
-        await client.query(
-          `UPDATE "MOTOR" SET motor_kilometer = GREATEST(motor_kilometer, $1) WHERE motor_nopol = $2;`,
-          [kmMasuk, createdWo.motor_nopol]
-        );
-      }
-
-      // Assign mekanik ke "WO_MEKANIK"
-      await client.query(
-        `
-          INSERT INTO "WO_MEKANIK" (work_no, mekanik_id, peran_mekanik)
-          VALUES ($1, $2, 'Penanggung Jawab')
-          ON CONFLICT (work_no, mekanik_id) DO NOTHING;
-        `,
-        [createdWo.work_no, mekanikId]
-      );
-
-      // Tambahkan jasa servis awal ("WO_JASA") jika dikirim
-      if (Array.isArray(data.initial_services) && data.initial_services.length > 0) {
-        for (const srv of data.initial_services) {
-          const jasaKode = String(srv.jasa_kode || srv.jasa_servis_id).trim();
-          await client.query(
-            `
-              INSERT INTO "WO_JASA" (work_no, jasa_kode)
-              VALUES ($1, $2)
-              ON CONFLICT (work_no, jasa_kode) DO NOTHING;
-            `,
-            [createdWo.work_no, jasaKode]
-          );
-        }
-      }
-
-      // Tambahkan suku cadang awal ("WO_SUKU_CADANG") jika dikirim
-      if (Array.isArray(data.initial_spareparts) && data.initial_spareparts.length > 0) {
-        for (const part of data.initial_spareparts) {
-          const scKode = String(part.suku_cadang_kode || part.suku_cadang_id).trim();
-          const qty = Math.round(Number(part.suku_cadang_qty || part.wo_sc_qty || part.jumlah || 1));
-          const scRes = await client.query(
-            `SELECT suku_cadang_harga_satuan FROM "SUKU_CADANG" WHERE suku_cadang_kode = $1`,
-            [scKode]
-          );
-          if (scRes.rows[0]) {
-            const jumlahRp = qty * Number(scRes.rows[0].suku_cadang_harga_satuan);
-            await client.query(
-              `
-                INSERT INTO "WO_SUKU_CADANG" (work_no, suku_cadang_kode, suku_cadang_qty, suku_cadang_jumlah)
-                VALUES ($1, $2, $3, $4);
-              `,
-              [createdWo.work_no, scKode, qty, jumlahRp]
-            );
-          }
-        }
-      }
-
-      await client.query('COMMIT');
-      return await this.getWorkOrderById(createdWo.work_no);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
-
-  async updateWorkOrder(id, data) {
-    const workNo = String(id).trim();
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      let workStatus = null;
-      let pembayaranStatus = null;
-      const rawStatus = data.work_status || data.status;
-      if (rawStatus) {
-        const s = String(rawStatus).trim().toLowerCase();
-        if (s === 'antre') workStatus = 'Antre';
-        else if (s === 'dibuat') workStatus = 'Dibuat';
-        else if (s === 'dikerjakan') workStatus = 'Dikerjakan';
-        else if (s === 'diproses') workStatus = 'Diproses';
-        else if (s === 'selesai') workStatus = 'Selesai';
-        else if (s === 'dibayar' || s === 'lunas') {
-          workStatus = 'Dibayar';
-          pembayaranStatus = 'Lunas';
-        } else if (s === 'dibatalkan') {
-          workStatus = 'Dibatalkan';
-          pembayaranStatus = 'Dibatalkan';
-        }
-      }
-
-      const diskon =
-        data.pembayaran_diskon !== undefined
-          ? Math.round(Number(data.pembayaran_diskon))
-          : data.diskon !== undefined
-          ? Math.round(Number(data.diskon))
-          : null;
-
-      const keluhan = data.work_keluhan || data.keluhan || null;
-      const mekanikId = data.mekanik_id ? String(data.mekanik_id).trim() : null;
-
-      const sql = `
-        UPDATE "WORK_ORDER"
-        SET
-          work_status = COALESCE($1, work_status),
-          pembayaran_status = COALESCE($2, pembayaran_status),
-          pembayaran_diskon = COALESCE($3, pembayaran_diskon),
-          work_keluhan = COALESCE($4, work_keluhan),
-          mekanik_id = COALESCE($5, mekanik_id),
-          work_tgl_selesai = CASE
-            WHEN $1 IN ('Selesai', 'Dibayar') AND work_tgl_selesai IS NULL THEN CURRENT_TIMESTAMP
-            ELSE work_tgl_selesai
-          END
-        WHERE UPPER(work_no) = UPPER($6)
-        RETURNING *;
-      `;
-
-      const { rows } = await client.query(sql, [
-        workStatus,
-        pembayaranStatus,
-        diskon,
-        keluhan,
-        mekanikId,
-        workNo,
-      ]);
-
-      if (!rows[0]) {
-        throw new AppError(`Work Order '${workNo}' tidak ditemukan.`, 404, 'WO_NOT_FOUND');
-      }
+      const createdWorkNo = rows[0].work_no;
 
       if (mekanikId) {
         await client.query(
           `
             INSERT INTO "WO_MEKANIK" (work_no, mekanik_id, peran_mekanik)
             VALUES ($1, $2, 'Penanggung Jawab')
-            ON CONFLICT (work_no, mekanik_id)
-            DO UPDATE SET peran_mekanik = 'Penanggung Jawab';
+            ON CONFLICT (work_no, mekanik_id) DO NOTHING;
           `,
-          [rows[0].work_no, mekanikId]
+          [createdWorkNo, mekanikId]
         );
       }
 
-      await client.query('COMMIT');
-      return await this.getWorkOrderById(rows[0].work_no);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
-
-  async addServiceToWorkOrder(workOrderId, jasaServisId) {
-    const workNo = String(workOrderId).trim();
-    const jasaKode = String(jasaServisId).trim();
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const jsRes = await client.query(
-        `SELECT jasa_kode, jasa_biaya FROM "JASA_SERVIS" WHERE jasa_kode = $1`,
-        [jasaKode]
-      );
-      if (!jsRes.rows[0]) {
-        throw new AppError(`Jasa servis '${jasaKode}' tidak ditemukan.`, 404, 'SERVICE_NOT_FOUND');
+      if (Array.isArray(data.jasa_ids) && data.jasa_ids.length > 0) {
+        for (const rawJasaKode of data.jasa_ids) {
+          await client.query(
+            `
+              INSERT INTO "WO_JASA" (work_no, jasa_kode)
+              VALUES ($1, $2)
+              ON CONFLICT (work_no, jasa_kode) DO NOTHING;
+            `,
+            [createdWorkNo, String(rawJasaKode).trim().toUpperCase()]
+          );
+        }
       }
 
-      await client.query(
-        `
-          INSERT INTO "WO_JASA" (work_no, jasa_kode)
-          VALUES ($1, $2)
-          ON CONFLICT (work_no, jasa_kode) DO NOTHING;
-        `,
-        [workNo, jasaKode]
-      );
-      await client.query('COMMIT');
-      return await this.getWorkOrderById(workNo);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
+      if (data.kilometer_masuk && motorNopol) {
+        await client.query(
+          `
+            UPDATE "MOTOR"
+            SET motor_kilometer = GREATEST(motor_kilometer, $1)
+            WHERE UPPER(motor_nopol) = UPPER($2);
+          `,
+          [Number(data.kilometer_masuk), String(motorNopol).trim()]
+        );
+      }
 
-  async removeServiceFromWorkOrder(workOrderId, itemId) {
-    const workNo = String(workOrderId).trim();
-    const jasaKode = String(itemId).trim();
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `DELETE FROM "WO_JASA" WHERE work_no = $1 AND jasa_kode = $2;`,
-        [workNo, jasaKode]
-      );
-      await client.query('COMMIT');
-      return await this.getWorkOrderById(workNo);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+      return createdWorkNo;
+    }).then((createdWorkNo) => this.getWorkOrderDetail(createdWorkNo));
   }
 
   /**
-   * Menambahkan Suku Cadang ke "WO_SUKU_CADANG" dalam transaksi ACID
-   * Skenario Debugging #3: Trigger PostgreSQL trg_kurangi_stok_suku_cadang (trg_fn_kurangi_stok)
-   * mengurangi "STOK_CABANG".stok_qty. Jika suku_cadang_qty > stok_qty, constraint
-   * "chk_stok_qty" (23514) melempar error, transaksi di-ROLLBACK dan HTTP 422 dikembalikan.
+   * Mengubah status / mekanik / keluhan pada "WORK_ORDER".
+   * Khusus role 'mekanik' (role_mekanik), HANYA melakukan UPDATE pada 3 kolom
+   * yang di-GRANT di Kelompok1_admin_security.sql:
+   * ("work_status", "work_tgl_selesai", "work_keluhan")
    */
-  async addSparepartToWorkOrder(workOrderId, sukuCadangId, jumlah) {
-    const workNo = String(workOrderId).trim();
-    const scKode = String(sukuCadangId).trim();
-    const qty = Math.round(Number(jumlah));
+  async updateWorkOrder(woId, data) {
+    const workNo = String(woId).trim().toUpperCase();
+    const { isRestrictedWo, isMekanik } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
 
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
+    const currentRes = await db.query(
+      `SELECT * FROM ${woSource} WHERE UPPER(work_no) = $1`,
+      [workNo]
+    );
+    if (!currentRes.rows[0]) {
+      throw new AppError('Work Order tidak ditemukan.', 404, 'WORK_ORDER_NOT_FOUND');
+    }
 
-      const scRes = await client.query(
-        `SELECT suku_cadang_kode, suku_cadang_harga_satuan FROM "SUKU_CADANG" WHERE suku_cadang_kode = $1`,
-        [scKode]
+    const current = currentRes.rows[0];
+    const mappedStatus = mapUiStatusToSingleDbStatus(data.work_status || data.status);
+    const nextStatus = mappedStatus || current.work_status;
+    const nextKeluhan = data.work_keluhan || data.keluhan || current.work_keluhan;
+
+    if (isMekanik) {
+      // Sesuai Kelompok1_admin_security.sql:
+      // GRANT UPDATE ("work_status", "work_tgl_selesai", "work_keluhan") ON "WORK_ORDER" TO role_mekanik;
+      const nextTglSelesai =
+        ['Selesai', 'Dibayar'].includes(nextStatus) && !current.work_tgl_selesai
+          ? new Date()
+          : current.work_tgl_selesai;
+      const mekUpdateSql = `
+        UPDATE "WORK_ORDER"
+        SET
+          "work_status" = $1,
+          "work_tgl_selesai" = $2,
+          "work_keluhan" = $3
+        WHERE "work_no" = $4;
+      `;
+      await db.query(mekUpdateSql, [
+        nextStatus,
+        nextTglSelesai,
+        nextKeluhan,
+        current.work_no,
+      ]);
+      return await this.getWorkOrderDetail(current.work_no);
+    }
+
+    const nextMekanik =
+      data.mekanik_id !== undefined ? data.mekanik_id : current.mekanik_id;
+    const nextDiskon =
+      data.pembayaran_diskon !== undefined
+        ? Math.round(Number(data.pembayaran_diskon))
+        : data.diskon !== undefined
+        ? Math.round(Number(data.diskon))
+        : current.pembayaran_diskon || 0;
+
+    let setTglSelesaiSql = 'work_tgl_selesai';
+    if (['Selesai', 'Dibayar'].includes(nextStatus) && !current.work_tgl_selesai) {
+      setTglSelesaiSql = 'COALESCE(work_tgl_selesai, CURRENT_TIMESTAMP)';
+    }
+
+    const sql = `
+      UPDATE "WORK_ORDER"
+      SET
+        work_status = $1,
+        mekanik_id = $2,
+        work_keluhan = $3,
+        pembayaran_diskon = $4,
+        work_tgl_selesai = ${setTglSelesaiSql}
+      WHERE work_no = $5;
+    `;
+    await db.query(sql, [
+      nextStatus,
+      nextMekanik,
+      nextKeluhan,
+      nextDiskon,
+      current.work_no,
+    ]);
+
+    if (nextMekanik) {
+      await db.query(
+        `
+          INSERT INTO "WO_MEKANIK" (work_no, mekanik_id, peran_mekanik)
+          VALUES ($1, $2, 'Penanggung Jawab')
+          ON CONFLICT (work_no, mekanik_id) DO NOTHING;
+        `,
+        [current.work_no, nextMekanik]
       );
-      if (!scRes.rows[0]) {
-        throw new AppError(`Suku cadang '${scKode}' tidak ditemukan.`, 404, 'SPAREPART_NOT_FOUND');
-      }
+    }
 
-      const hargaSatuan = Number(scRes.rows[0].suku_cadang_harga_satuan);
+    return await this.getWorkOrderDetail(current.work_no);
+  }
 
-      // Pastikan baris cabang_kode + suku_cadang_kode ada di "STOK_CABANG" agar UPDATE pada trg_fn_kurangi_stok mengenai baris tersebut
-      const woCabangRes = await client.query(
-        `SELECT cabang_kode FROM "WORK_ORDER" WHERE work_no = $1`,
+  async addServiceToWorkOrder(woId, jasaArg) {
+    const workNo = String(woId).trim().toUpperCase();
+    const rawKode =
+      typeof jasaArg === 'object' && jasaArg !== null
+        ? jasaArg.jasa_kode || jasaArg.jasa_servis_id
+        : jasaArg;
+    const kodeJasa = String(rawKode || '').trim().toUpperCase();
+
+    const srvRes = await db.query(
+      `SELECT * FROM "JASA_SERVIS" WHERE UPPER(jasa_kode) = $1`,
+      [kodeJasa]
+    );
+    if (!srvRes.rows[0]) {
+      throw new AppError(`Jasa servis '${kodeJasa}' tidak ditemukan.`, 404, 'SERVICE_NOT_FOUND');
+    }
+
+    await db.query(
+      `
+        INSERT INTO "WO_JASA" (work_no, jasa_kode)
+        VALUES ($1, $2)
+        ON CONFLICT (work_no, jasa_kode) DO NOTHING;
+      `,
+      [workNo, srvRes.rows[0].jasa_kode]
+    );
+
+    return await this.getWorkOrderDetail(workNo);
+  }
+
+  async removeServiceFromWorkOrder(woId, itemId) {
+    const workNo = String(woId).trim().toUpperCase();
+    const kodeJasa = String(itemId).trim().toUpperCase();
+
+    await db.query(
+      `DELETE FROM "WO_JASA" WHERE UPPER(work_no) = $1 AND UPPER(jasa_kode) = $2`,
+      [workNo, kodeJasa]
+    );
+    return await this.getWorkOrderDetail(workNo);
+  }
+
+  /**
+   * Menambahkan pemakaian suku cadang ke tabel "WO_SUKU_CADANG"
+   * Skenario Debugging #3:
+   * Trigger asli Kelompok 1 (`trg_kurangi_stok_suku_cadang` -> `trg_fn_kurangi_stok`)
+   * mengurangi `stok_qty` di `"STOK_CABANG"` dan memiliki constraint `"chk_stok_qty" CHECK ("stok_qty" >= 0)`.
+   */
+  async addSparepartToWorkOrder(woId, partArg, qtyArg) {
+    const workNo = String(woId).trim().toUpperCase();
+    const rawKode =
+      typeof partArg === 'object' && partArg !== null
+        ? partArg.suku_cadang_kode || partArg.suku_cadang_id
+        : partArg;
+    const rawQty =
+      typeof partArg === 'object' && partArg !== null
+        ? partArg.suku_cadang_qty !== undefined
+          ? partArg.suku_cadang_qty
+          : partArg.jumlah
+        : qtyArg;
+
+    const kodePart = String(rawKode || '').trim().toUpperCase();
+    const qty = Math.round(Number(rawQty || 1));
+
+    const { isRestrictedWo } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+
+    await db.withTransaction(async (client) => {
+      const woRes = await client.query(
+        `SELECT work_no, cabang_kode, work_status FROM ${woSource} WHERE UPPER(work_no) = $1`,
         [workNo]
       );
-      if (woCabangRes.rows[0]) {
-        await client.query(
-          `
-            INSERT INTO "STOK_CABANG" (cabang_kode, suku_cadang_kode, stok_qty, stok_minimum)
-            VALUES ($1, $2, 0, 2)
-            ON CONFLICT (cabang_kode, suku_cadang_kode) DO NOTHING;
-          `,
-          [woCabangRes.rows[0].cabang_kode, scKode]
+      if (!woRes.rows[0]) {
+        throw new AppError(`Work Order '${workNo}' tidak ditemukan.`, 404, 'WORK_ORDER_NOT_FOUND');
+      }
+
+      const wo = woRes.rows[0];
+      if (['Dibayar', 'Dibatalkan'].includes(wo.work_status)) {
+        throw new AppError(
+          `Work Order #${wo.work_no} sudah berstatus '${wo.work_status}' sehingga tidak dapat diubah lagi.`,
+          422,
+          'WORK_ORDER_LOCKED'
         );
       }
 
-      const existing = await client.query(
-        `SELECT suku_cadang_qty FROM "WO_SUKU_CADANG" WHERE work_no = $1 AND suku_cadang_kode = $2`,
-        [workNo, scKode]
+      const partRes = await client.query(
+        `
+          SELECT
+            sc.suku_cadang_kode,
+            sc.suku_cadang_nama,
+            sc.suku_cadang_harga_satuan,
+            COALESCE(st.stok_qty, 0) AS stok_tersedia
+          FROM "SUKU_CADANG" sc
+          LEFT JOIN "STOK_CABANG" st
+            ON st.suku_cadang_kode = sc.suku_cadang_kode AND st.cabang_kode = $2
+          WHERE UPPER(sc.suku_cadang_kode) = $1;
+        `,
+        [kodePart, wo.cabang_kode]
       );
 
-      if (existing.rowCount > 0) {
-        const newQty = Number(existing.rows[0].suku_cadang_qty) + qty;
+      if (!partRes.rows[0]) {
+        throw new AppError(`Suku cadang '${kodePart}' tidak ditemukan.`, 404, 'SPAREPART_NOT_FOUND');
+      }
+
+      const part = partRes.rows[0];
+      const stokTersedia = Number(part.stok_tersedia);
+
+      if (stokTersedia < qty) {
+        throw new AppError(
+          `Stok suku cadang "${part.suku_cadang_nama}" (${part.suku_cadang_kode}) di cabang ${wo.cabang_kode} tidak mencukupi! Stok tersedia: ${stokTersedia} PCS, jumlah diminta: ${qty} PCS.`,
+          422,
+          'INSUFFICIENT_SPAREPART_STOCK',
+          {
+            pgCode: 'P0001',
+            constraint: 'chk_stok_qty',
+            cabang_kode: wo.cabang_kode,
+            suku_cadang_kode: part.suku_cadang_kode,
+            suku_cadang_nama: part.suku_cadang_nama,
+            stok_tersedia: stokTersedia,
+            jumlah_diminta: qty,
+          }
+        );
+      }
+
+      const subtotal = qty * Number(part.suku_cadang_harga_satuan);
+
+      const existRes = await client.query(
+        `SELECT * FROM "WO_SUKU_CADANG" WHERE work_no = $1 AND suku_cadang_kode = $2`,
+        [wo.work_no, part.suku_cadang_kode]
+      );
+
+      if (existRes.rows[0]) {
         await client.query(
           `DELETE FROM "WO_SUKU_CADANG" WHERE work_no = $1 AND suku_cadang_kode = $2`,
-          [workNo, scKode]
+          [wo.work_no, part.suku_cadang_kode]
         );
+        const newQty = Number(existRes.rows[0].suku_cadang_qty) + qty;
+        const newSub = newQty * Number(part.suku_cadang_harga_satuan);
         await client.query(
           `
             INSERT INTO "WO_SUKU_CADANG" (work_no, suku_cadang_kode, suku_cadang_qty, suku_cadang_jumlah)
             VALUES ($1, $2, $3, $4);
           `,
-          [workNo, scKode, newQty, newQty * hargaSatuan]
+          [wo.work_no, part.suku_cadang_kode, newQty, newSub]
         );
       } else {
         await client.query(
@@ -726,254 +823,184 @@ class OperationsRepository {
             INSERT INTO "WO_SUKU_CADANG" (work_no, suku_cadang_kode, suku_cadang_qty, suku_cadang_jumlah)
             VALUES ($1, $2, $3, $4);
           `,
-          [workNo, scKode, qty, qty * hargaSatuan]
+          [wo.work_no, part.suku_cadang_kode, qty, subtotal]
         );
       }
+    });
 
-      await client.query('COMMIT');
-      return await this.getWorkOrderById(workNo);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    return await this.getWorkOrderDetail(workNo);
   }
 
-  async removeSparepartFromWorkOrder(workOrderId, itemId) {
-    const workNo = String(workOrderId).trim();
-    const scKode = String(itemId).trim();
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `DELETE FROM "WO_SUKU_CADANG" WHERE work_no = $1 AND suku_cadang_kode = $2;`,
-        [workNo, scKode]
-      );
-      await client.query('COMMIT');
-      return await this.getWorkOrderById(workNo);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+  async removeSparepartFromWorkOrder(woId, itemId) {
+    const workNo = String(woId).trim().toUpperCase();
+    const kodePart = String(itemId).trim().toUpperCase();
+
+    await db.query(
+      `DELETE FROM "WO_SUKU_CADANG" WHERE UPPER(work_no) = $1 AND UPPER(suku_cadang_kode) = $2`,
+      [workNo, kodePart]
+    );
+    return await this.getWorkOrderDetail(workNo);
   }
 
   // ==========================================================================
-  // PEMBAYARAN KASIR (Atribut Pembayaran Menyatu di Tabel "WORK_ORDER")
+  // 2. PEMBAYARAN KASIR (Kolom pembayaran_* pada "WORK_ORDER")
+  //    Skenario Debugging #2: Pembayaran Dobel -> HTTP 409 Conflict
   // ==========================================================================
   async getAllPayments() {
+    const { isRestrictedCustomer } = this.getRoleFlags();
+    const customerSource = isRestrictedCustomer
+      ? '"VW_PELANGGAN_AMAN"'
+      : '"PELANGGAN"';
+
     const sql = `
       SELECT
         wo.work_no AS id,
-        wo.work_no AS work_order_id,
         wo.work_no,
-        wo.work_no AS nomor_wo,
         ('KWT-' || wo.work_no) AS nomor_kwitansi,
-        CASE
-          WHEN wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar' THEN 'dibayar'
-          ELSE LOWER(wo.work_status)
-        END AS status_wo,
-        wo.work_status,
+        wo.work_no AS work_order_id,
+        wo.work_no AS nomor_wo,
+        UPPER(COALESCE(wo.pembayaran_metode, 'Tunai')) AS metode_pembayaran,
+        wo.pembayaran_metode,
+        fn_hitung_total_tagihan(wo.work_no) AS jumlah_bayar,
+        fn_hitung_total_tagihan(wo.work_no) AS total_tagihan,
+        'LUNAS'::VARCHAR AS status_pembayaran,
+        wo.pembayaran_status,
+        COALESCE(wo.work_tgl_selesai, wo.work_tgl_masuk) AS tanggal_bayar,
+        ('Pelunasan servis Work Order #' || wo.work_no) AS catatan,
         CASE
           WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
           ELSE 'LANGSUNG'
         END AS skema_pembayaran,
-        COALESCE(
-          (
-            SELECT SUM(js.jasa_biaya)
-            FROM "WO_JASA" wj
-            JOIN "JASA_SERVIS" js ON js.jasa_kode = wj.jasa_kode
-            WHERE wj.work_no = wo.work_no
-          ),
-          0
-        ) AS total_biaya_jasa,
-        COALESCE(
-          (
-            SELECT SUM(wsc.suku_cadang_jumlah)
-            FROM "WO_SUKU_CADANG" wsc
-            WHERE wsc.work_no = wo.work_no
-          ),
-          0
-        ) AS total_biaya_part,
-        wo.pembayaran_diskon AS diskon,
-        wo.pembayaran_diskon,
-        fn_hitung_total_tagihan(wo.work_no) AS total_tagihan,
-        fn_hitung_total_tagihan(wo.work_no) AS jumlah_bayar,
-        UPPER(COALESCE(wo.pembayaran_metode, 'TUNAI')) AS metode_pembayaran,
-        wo.pembayaran_metode,
-        UPPER(wo.pembayaran_status) AS status_pembayaran,
-        wo.pembayaran_status,
-        COALESCE(wo.work_tgl_selesai, wo.work_tgl_masuk) AS tanggal_bayar,
         m.motor_nopol AS plat_nomor,
-        m.motor_nopol,
-        (m.motor_merek || ' ' || m.motor_tipe) AS kendaraan,
+        m.motor_merek AS merk,
+        m.motor_merek AS motor_merk,
+        m.motor_tipe AS tipe_motor,
         p.pelanggan_id,
-        p.pelanggan_id AS kode_pelanggan,
         p.pelanggan_nama AS nama_pelanggan,
-        UPPER(p.pelanggan_tipe) AS tipe_pelanggan,
-        p.pelanggan_tipe,
+        UPPER(COALESCE(p.pelanggan_tipe, 'Individu')) AS tipe_pelanggan,
         CASE WHEN p.pelanggan_tipe = 'Korporat' THEN p.pelanggan_nama ELSE NULL END AS nama_perusahaan,
-        p.sisa_plafon,
         c.cabang_kode AS kode_cabang,
-        c.cabang_kode,
         c.cabang_nama AS nama_cabang,
         'Budi Santoso'::VARCHAR AS nama_kasir
       FROM "WORK_ORDER" wo
       JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
-      JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+      JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
       JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
-      WHERE wo.pembayaran_status = 'Lunas'
-         OR wo.work_status = 'Dibayar'
-         OR (wo.work_status = 'Selesai' AND wo.pembayaran_metode = 'Tagihan Kolektif')
+      WHERE wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar'
       ORDER BY COALESCE(wo.work_tgl_selesai, wo.work_tgl_masuk) DESC, wo.work_no DESC;
     `;
     const { rows } = await db.query(sql);
     return rows;
   }
 
-  /**
-   * Memproses Pembayaran Work Order dalam Transaksi ACID (BEGIN ... COMMIT / ROLLBACK)
-   * Skenario Debugging #2: Pengecekan pembayaran_status = 'Lunas' atau work_status = 'Dibayar'
-   * pada tabel "WORK_ORDER" di dalam transaksi dengan row-level lock FOR UPDATE -> 409 Conflict!
-   */
   async createPayment(data, _user) {
-    const workNo = String(data.work_no || data.work_order_id || '').trim();
-    const client = await db.pool.connect();
-    try {
-      await client.query('BEGIN');
+    const workNo = String(data.work_no || data.work_order_id)
+      .trim()
+      .toUpperCase();
 
-      const woCheckSql = `
-        SELECT
-          wo.work_no,
-          wo.work_status,
-          wo.pembayaran_status,
-          wo.pembayaran_metode,
-          wo.pembayaran_diskon,
-          wo.work_tgl_selesai,
-          wo.motor_nopol,
-          fn_hitung_total_tagihan(wo.work_no) AS total_tagihan,
-          p.pelanggan_id,
-          p.pelanggan_tipe,
-          p.pelanggan_nama,
-          p.sisa_plafon
-        FROM "WORK_ORDER" wo
-        JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
-        JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
-        WHERE UPPER(wo.work_no) = UPPER($1)
-        FOR UPDATE OF wo;
-      `;
-      const { rows: woRows } = await client.query(woCheckSql, [workNo]);
+    return await db.withTransaction(async (client) => {
+      const woRes = await client.query(
+        `
+          SELECT
+            wo.*,
+            fn_hitung_total_tagihan(wo.work_no) AS tagihan_terhitung
+          FROM "WORK_ORDER" wo
+          WHERE UPPER(wo.work_no) = $1
+          FOR UPDATE;
+        `,
+        [workNo]
+      );
 
-      if (!woRows[0]) {
+      const wo = woRes.rows[0];
+      if (!wo) {
         throw new AppError(
-          `Work Order '${workNo}' tidak ditemukan pada tabel "WORK_ORDER".`,
+          `Work Order '${workNo}' tidak ditemukan.`,
           404,
-          'WO_NOT_FOUND'
+          'WORK_ORDER_NOT_FOUND'
         );
       }
 
-      const wo = woRows[0];
-
-      // Skenario Debugging #2: Jika "WORK_ORDER".pembayaran_status sudah 'Lunas' atau work_status = 'Dibayar', tolak dengan 409 Conflict!
+      // Skenario Debugging #2: Tolak Pembayaran Dobel dengan 409 Conflict!
       if (wo.pembayaran_status === 'Lunas' || wo.work_status === 'Dibayar') {
         throw new AppError(
-          `Pembayaran Dobel Ditolak (409 Conflict): Work Order ${wo.work_no} sudah berstatus 'Lunas' pada tabel "WORK_ORDER" (Metode: ${wo.pembayaran_metode || 'Tunai'}). Transaksi dibatalkan di dalam blok BEGIN...ROLLBACK.`,
+          `Penolakan Pembayaran Ganda (Double Payment): Work Order #${wo.work_no} sudah berstatus Lunas ('${wo.pembayaran_status}' / '${wo.work_status}') melalui metode ${wo.pembayaran_metode}.`,
           409,
           'DOUBLE_PAYMENT_CONFLICT',
           {
-            workNo: wo.work_no,
-            nomorWo: wo.work_no,
-            currentStatus: wo.work_status,
-            pembayaranStatus: wo.pembayaran_status,
-            pembayaranMetode: wo.pembayaran_metode,
-            existingReceipt: {
-              nomor_kwitansi: `KWT-${wo.work_no}`,
-              metode_pembayaran: wo.pembayaran_metode,
-              tanggal_bayar: wo.work_tgl_selesai,
-            },
-            dbTable: '"WORK_ORDER"',
-            dbColumn: 'pembayaran_status = \'Lunas\'',
+            pgCode: 'P0002',
+            work_no: wo.work_no,
+            nomor_wo: wo.work_no,
+            existing_receipt: `KWT-${wo.work_no}`,
+            pembayaran_status: wo.pembayaran_status,
+            work_status: wo.work_status,
+            paid_at: wo.work_tgl_selesai || wo.work_tgl_masuk,
           }
         );
       }
 
-      // Normalisasi metode pembayaran sesuai CHECK constraint pada "WORK_ORDER"
-      // ('Tunai', 'Debit', 'Kredit', 'QRIS', 'Transfer', 'Tagihan Kolektif')
-      const rawMetode = String(
-        data.pembayaran_metode ||
-          data.metode_pembayaran ||
-          (wo.pelanggan_tipe === 'Korporat' ? 'Tagihan Kolektif' : 'Tunai')
-      ).toUpperCase();
-
-      let metodeDb = 'Tunai';
-      if (rawMetode.includes('QRIS')) metodeDb = 'QRIS';
-      else if (rawMetode.includes('TRANSFER')) metodeDb = 'Transfer';
-      else if (rawMetode.includes('DEBIT')) metodeDb = 'Debit';
-      else if (rawMetode.includes('KREDIT') && !rawMetode.includes('PLAFON')) metodeDb = 'Kredit';
-      else if (
-        rawMetode.includes('PLAFON') ||
-        rawMetode.includes('KORPORAT') ||
-        rawMetode.includes('KOLEKTIF')
-      ) {
-        metodeDb = 'Tagihan Kolektif';
+      if (wo.work_status === 'Dibatalkan') {
+        throw new AppError(
+          `Work Order #${wo.work_no} telah dibatalkan dan tidak dapat dibayar.`,
+          400,
+          'CANCELLED_WORK_ORDER'
+        );
       }
 
-      const diskonBaru =
-        data.pembayaran_diskon !== undefined
-          ? Math.round(Number(data.pembayaran_diskon))
-          : data.diskon !== undefined
-          ? Math.round(Number(data.diskon))
-          : Math.round(Number(wo.pembayaran_diskon || 0));
+      const rawMethod = String(
+        data.pembayaran_metode || data.metode_pembayaran || wo.pembayaran_metode || 'Tunai'
+      ).toUpperCase();
 
-      const updatePaySql = `
+      let dbMetode = 'Tunai';
+      if (rawMethod.includes('QRIS')) dbMetode = 'QRIS';
+      else if (rawMethod.includes('TRANSFER')) dbMetode = 'Transfer';
+      else if (rawMethod.includes('DEBIT')) dbMetode = 'Debit';
+      else if (rawMethod.includes('KREDIT')) dbMetode = 'Kredit';
+      else if (rawMethod.includes('PLAFON') || rawMethod.includes('KOLEKTIF')) {
+        dbMetode = 'Tagihan Kolektif';
+      }
+
+      const isKolektif = dbMetode === 'Tagihan Kolektif';
+      const newPembayaranStatus = isKolektif ? 'Belum Lunas' : 'Lunas';
+      const newWorkStatus = isKolektif ? 'Selesai' : 'Dibayar';
+
+      const updateSql = `
         UPDATE "WORK_ORDER"
         SET
-          work_status = 'Dibayar',
-          work_tgl_selesai = COALESCE(work_tgl_selesai, CURRENT_TIMESTAMP),
           pembayaran_metode = $1,
-          pembayaran_status = 'Lunas',
-          pembayaran_diskon = $2
-        WHERE work_no = $3
-        RETURNING *;
+          pembayaran_status = $2,
+          work_status = $3,
+          work_tgl_selesai = COALESCE(work_tgl_selesai, CURRENT_TIMESTAMP)
+        WHERE work_no = $4
+        RETURNING
+          work_no,
+          pembayaran_metode,
+          pembayaran_status,
+          work_status,
+          work_tgl_selesai;
       `;
 
-      const { rows: updatedRows } = await client.query(updatePaySql, [
-        metodeDb,
-        diskonBaru,
+      const { rows } = await client.query(updateSql, [
+        dbMetode,
+        newPembayaranStatus,
+        newWorkStatus,
         wo.work_no,
       ]);
 
-      const procRes = await client.query(`CALL sp_hitung_total_tagihan($1, NULL);`, [wo.work_no]);
-      const totalTagihan = Math.max(
-        Number(procRes.rows[0] ? procRes.rows[0].p_total_tagihan : 0),
-        0
-      );
-
-      await client.query('COMMIT');
-
-      const updatedWo = updatedRows[0];
+      const updated = rows[0];
       return {
-        id: updatedWo.work_no,
-        work_no: updatedWo.work_no,
-        work_order_id: updatedWo.work_no,
-        nomor_wo: updatedWo.work_no,
-        nomor_kwitansi: `KWT-${updatedWo.work_no}`,
-        pembayaran_metode: updatedWo.pembayaran_metode,
-        metode_pembayaran: updatedWo.pembayaran_metode.toUpperCase(),
-        pembayaran_status: updatedWo.pembayaran_status,
-        status_pembayaran: updatedWo.pembayaran_status.toUpperCase(),
-        pembayaran_diskon: updatedWo.pembayaran_diskon,
-        jumlah_bayar: totalTagihan,
-        tanggal_bayar: updatedWo.work_tgl_selesai,
+        id: updated.work_no,
+        work_no: updated.work_no,
+        work_order_id: updated.work_no,
+        nomor_wo: updated.work_no,
+        nomor_kwitansi: `KWT-${updated.work_no}`,
+        metode_pembayaran: updated.pembayaran_metode.toUpperCase(),
+        pembayaran_metode: updated.pembayaran_metode,
+        jumlah_bayar: Number(wo.tagihan_terhitung),
+        status_pembayaran: updated.pembayaran_status.toUpperCase(),
+        pembayaran_status: updated.pembayaran_status,
+        tanggal_bayar: updated.work_tgl_selesai,
       };
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    });
   }
 }
 
