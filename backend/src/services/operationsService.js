@@ -6,8 +6,8 @@ class OperationsService {
     return await operationsRepository.getAllWorkOrders(statusFilter);
   }
 
-  async getWorkOrderDetail(idOrNomor) {
-    const wo = await operationsRepository.getWorkOrderById(idOrNomor);
+  async getWorkOrderDetail(idOrNomor, dbRole = 'role_owner') {
+    const wo = await operationsRepository.getWorkOrderById(idOrNomor, dbRole);
     if (!wo) {
       throw new AppError(`Work Order '${idOrNomor}' tidak ditemukan.`, 404, 'WO_NOT_FOUND');
     }

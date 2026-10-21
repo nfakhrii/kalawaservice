@@ -179,8 +179,8 @@ export default function OverviewPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#d0d7de] text-xs">
-                {(data?.recentWorkOrders || []).map((wo) => (
-                  <tr key={wo.id} className="hover:bg-[#f6f8fa]/70 transition-colors">
+                {(data?.recentWorkOrders || []).map((wo, index) => (
+                  <tr key={wo.work_no || wo.id || index} className="hover:bg-[#f6f8fa]/70 transition-colors">
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <Link
                         to={`/app/operations/work-orders/${wo.nomor_wo}`}
@@ -234,8 +234,8 @@ export default function OverviewPage() {
               </Link>
             </div>
             <div className="divide-y divide-[#d0d7de]">
-              {(data?.corporateFleetSummary || []).map((corp) => (
-                <div key={corp.pelanggan_id} className="p-3.5 text-xs">
+              {(data?.corporateFleetSummary || []).map((corp, index) => (
+                <div key={corp.pelanggan_id || corp.kode_pelanggan || index} className="p-3.5 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-[#1f2328]">{corp.nama_perusahaan}</span>
                     <span className="font-mono text-[11px] text-[#0969da] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
@@ -275,8 +275,11 @@ export default function OverviewPage() {
               </Link>
             </div>
             <div className="divide-y divide-[#d0d7de]">
-              {(data?.lowStockAlerts || []).map((item) => (
-                <div key={item.suku_cadang_id} className="p-3 flex items-center justify-between gap-2 text-xs">
+              {(data?.lowStockAlerts || []).map((item, index) => (
+                <div
+                  key={`${item.cabang_kode || 'CB'}-${item.suku_cadang_kode || item.suku_cadang_id || item.kode_sku || index}`}
+                  className="p-3 flex items-center justify-between gap-2 text-xs"
+                >
                   <div className="min-w-0">
                     <div className="font-mono text-[11px] font-semibold text-[#0969da]">
                       {item.kode_sku}

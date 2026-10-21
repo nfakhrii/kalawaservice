@@ -456,6 +456,7 @@ class AnalyticsRepository {
       WITH low_stock_cte AS (
         SELECT
           (st.cabang_kode || '-' || sc.suku_cadang_kode) AS id,
+          (st.cabang_kode || '-' || sc.suku_cadang_kode) AS suku_cadang_id,
           sc.suku_cadang_kode,
           sc.suku_cadang_kode AS kode_sku,
           sc.suku_cadang_nama AS nama_part,

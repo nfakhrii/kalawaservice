@@ -87,8 +87,11 @@ export default function LowStockReportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#d0d7de] text-xs">
-                {rows.map((r) => (
-                  <tr key={r.suku_cadang_id} className="hover:bg-[#f6f8fa]/70">
+                {rows.map((r, index) => (
+                  <tr
+                    key={r.id || r.suku_cadang_id || `${r.cabang_kode || 'CB'}-${r.kode_sku || r.suku_cadang_kode || index}`}
+                    className="hover:bg-[#f6f8fa]/70"
+                  >
                     <td className="py-2.5 px-3 font-mono whitespace-nowrap">
                       <div className="font-semibold text-[#0969da]">{r.kode_sku}</div>
                       <div className="text-[10px] text-[#656d76]">{r.lokasi_rak}</div>

@@ -59,17 +59,33 @@ function authorizeRoles(...allowedRoles) {
       );
     }
 
-    const userRole = req.user.role;
-    if (!allowedRoles.includes(userRole)) {
+    const rawRole = String(req.user.role || '').toLowerCase();
+    const rawDbRole = String(req.user.db_role || `role_${rawRole}`).toLowerCase();
+    const rawUsername = String(req.user.username || '').toLowerCase();
+
+    const allowedSet = new Set(
+      allowedRoles.map((r) => String(r).toLowerCase().trim())
+    );
+
+    const isAllowed =
+      allowedSet.has(rawRole) ||
+      allowedSet.has(rawDbRole) ||
+      allowedSet.has(rawUsername) ||
+      allowedSet.has(`role_${rawRole}`) ||
+      allowedSet.has(`user_${rawRole}`) ||
+      ((rawRole === 'owner' || rawDbRole === 'role_owner' || rawUsername === 'user_owner') &&
+        (allowedSet.has('owner') || allowedSet.has('role_owner') || allowedSet.has('user_owner')));
+
+    if (!isAllowed) {
       return next(
         new AppError(
-          `Akses Ditolak (RBAC Violation): Akun '${req.user.username}' dengan role '${userRole}' (${req.user.db_role || 'role_' + userRole}) tidak memiliki hak akses (privilege) untuk menjalankan operasi ini. Role yang diizinkan: [${allowedRoles.join(', ')}].`,
+          `Akses Ditolak (RBAC Violation): Akun '${req.user.username}' dengan role '${rawRole}' (${rawDbRole}) tidak memiliki hak akses (privilege) untuk menjalankan operasi ini. Role yang diizinkan: [${allowedRoles.join(', ')}].`,
           403,
           'FORBIDDEN_INSUFFICIENT_PRIVILEGE',
           {
             currentUser: req.user.username,
-            currentRole: userRole,
-            currentDbRole: req.user.db_role,
+            currentRole: rawRole,
+            currentDbRole: rawDbRole,
             requiredRoles: allowedRoles,
             endpoint: `${req.method} ${req.originalUrl}`,
           }

@@ -100,8 +100,8 @@ export default function SparepartUsageReportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#d0d7de] text-xs">
-                {rows.map((r) => (
-                  <tr key={r.detail_id} className="hover:bg-[#f6f8fa]/70">
+                {rows.map((r, index) => (
+                  <tr key={r.detail_id || `${r.work_no}-${r.suku_cadang_kode || index}`} className="hover:bg-[#f6f8fa]/70">
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <Link

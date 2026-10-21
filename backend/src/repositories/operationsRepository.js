@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { queryAsUser } = require('../config/db');
 const AppError = require('../utils/AppError');
 
 const UI_TO_DB_STATUS = {
@@ -188,8 +189,85 @@ class OperationsRepository {
       ${whereClause}
       ORDER BY wo.work_tgl_masuk DESC, wo.work_no DESC;
     `;
-    const { rows } = await db.query(sql, params);
-    return rows;
+
+    const countsSql = isRestrictedWo
+      ? `
+        SELECT
+          COUNT(*)::INT AS all,
+          COUNT(*) FILTER (WHERE work_status IN ('Dibuat', 'Antre'))::INT AS antre,
+          COUNT(*) FILTER (WHERE work_status IN ('Diproses', 'Dikerjakan'))::INT AS dikerjakan,
+          COUNT(*) FILTER (WHERE work_status = 'Selesai')::INT AS selesai,
+          COUNT(*) FILTER (WHERE work_status = 'Dibayar')::INT AS dibayar,
+          COUNT(*) FILTER (WHERE work_status = 'Dibatalkan')::INT AS dibatalkan
+        FROM "VW_WORK_ORDER_AMAN";
+      `
+      : `
+        SELECT
+          COUNT(*)::INT AS all,
+          COUNT(*) FILTER (WHERE work_status IN ('Dibuat', 'Antre'))::INT AS antre,
+          COUNT(*) FILTER (WHERE work_status IN ('Diproses', 'Dikerjakan'))::INT AS dikerjakan,
+          COUNT(*) FILTER (WHERE work_status = 'Selesai' AND pembayaran_status = 'Belum Lunas')::INT AS selesai,
+          COUNT(*) FILTER (WHERE pembayaran_status = 'Lunas' OR work_status = 'Dibayar')::INT AS dibayar,
+          COUNT(*) FILTER (WHERE work_status = 'Dibatalkan')::INT AS dibatalkan
+        FROM "WORK_ORDER";
+      `;
+
+    const [{ rows }, countsRes] = await Promise.all([
+      db.query(sql, params),
+      db.query(countsSql),
+    ]);
+
+    return {
+      workOrders: rows,
+      counts: countsRes.rows[0] || {
+        all: rows.length,
+        antre: 0,
+        dikerjakan: 0,
+        selesai: 0,
+        dibayar: 0,
+        dibatalkan: 0,
+      },
+    };
+  }
+
+  async getWorkOrderById(workNo, dbRole = 'role_owner') {
+    const normalizedWorkNo = String(workNo || '').trim().toUpperCase();
+    const userCtx = db.getCurrentUserContext();
+    const effectiveRole = userCtx?.db_role || userCtx?.username || dbRole || 'role_owner';
+    const isRestricted = [
+      'role_mekanik',
+      'role_petugas_gudang',
+      'role_auditor',
+      'user_mekanik',
+      'user_gudang',
+      'user_auditor',
+      'mekanik',
+      'gudang',
+      'auditor',
+    ].includes(effectiveRole);
+
+    const query = isRestricted
+      ? `SELECT * FROM "VW_WORK_ORDER_AMAN" WHERE "work_no" = $1`
+      : `SELECT * FROM "WORK_ORDER" WHERE "work_no" = $1`;
+
+    let result;
+    try {
+      result = await queryAsUser(effectiveRole, query, [normalizedWorkNo]);
+    } catch (err) {
+      if (err.code === '42501' || err.code === '42P01') {
+        const fallbackQuery = `SELECT * FROM "VW_WORK_ORDER_AMAN" WHERE "work_no" = $1`;
+        result = await queryAsUser('role_owner', fallbackQuery, [normalizedWorkNo]);
+      } else {
+        throw err;
+      }
+    }
+
+    if (!result || !result.rows[0]) {
+      return null;
+    }
+
+    const detail = await this.getWorkOrderDetail(normalizedWorkNo);
+    return detail ? { ...result.rows[0], ...detail } : result.rows[0];
   }
 
   async getWorkOrderDetail(woId) {
@@ -464,6 +542,9 @@ class OperationsRepository {
       let pelangganTipe = 'Individu';
       let diskonKontrakRp = 0;
 
+      const { isRestrictedCustomer } = this.getRoleFlags();
+      const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+
       if (motorNopol) {
         const motorRes = await client.query(
           `
@@ -474,7 +555,7 @@ class OperationsRepository {
               p.mekanik_id_pilihan,
               kk.diskon_kontrak_persen
             FROM "MOTOR" m
-            JOIN "PELANGGAN" p ON p.pelanggan_id = m.pelanggan_id
+            JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
             LEFT JOIN "KONTRAK_KORPORAT" kk
               ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
             WHERE UPPER(m.motor_nopol) = UPPER($1)
@@ -847,18 +928,28 @@ class OperationsRepository {
   //    Skenario Debugging #2: Pembayaran Dobel -> HTTP 409 Conflict
   // ==========================================================================
   async getAllPayments() {
-    const { isRestrictedCustomer } = this.getRoleFlags();
+    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
     const customerSource = isRestrictedCustomer
       ? '"VW_PELANGGAN_AMAN"'
       : '"PELANGGAN"';
 
-    const sql = `
-      SELECT
-        wo.work_no AS id,
-        wo.work_no,
-        ('KWT-' || wo.work_no) AS nomor_kwitansi,
-        wo.work_no AS work_order_id,
-        wo.work_no AS nomor_wo,
+    const paymentColumnsSql = isRestrictedWo
+      ? `
+        'REDACTED'::VARCHAR AS metode_pembayaran,
+        'REDACTED'::VARCHAR AS pembayaran_metode,
+        fn_hitung_total_tagihan(wo.work_no) AS jumlah_bayar,
+        fn_hitung_total_tagihan(wo.work_no) AS total_tagihan,
+        'LUNAS'::VARCHAR AS status_pembayaran,
+        'REDACTED'::VARCHAR AS pembayaran_status,
+        COALESCE(wo.work_tgl_selesai, wo.work_tgl_masuk) AS tanggal_bayar,
+        ('Pelunasan servis Work Order #' || wo.work_no) AS catatan,
+        CASE
+          WHEN p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
+          ELSE 'LANGSUNG'
+        END AS skema_pembayaran,
+      `
+      : `
         UPPER(COALESCE(wo.pembayaran_metode, 'Tunai')) AS metode_pembayaran,
         wo.pembayaran_metode,
         fn_hitung_total_tagihan(wo.work_no) AS jumlah_bayar,
@@ -871,6 +962,20 @@ class OperationsRepository {
           WHEN wo.pembayaran_metode = 'Tagihan Kolektif' OR p.pelanggan_tipe = 'Korporat' THEN 'PLAFON_KORPORAT'
           ELSE 'LANGSUNG'
         END AS skema_pembayaran,
+      `;
+
+    const wherePaidSql = isRestrictedWo
+      ? `WHERE wo.work_status = 'Dibayar'`
+      : `WHERE wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar'`;
+
+    const sql = `
+      SELECT
+        wo.work_no AS id,
+        wo.work_no,
+        ('KWT-' || wo.work_no) AS nomor_kwitansi,
+        wo.work_no AS work_order_id,
+        wo.work_no AS nomor_wo,
+        ${paymentColumnsSql}
         m.motor_nopol AS plat_nomor,
         m.motor_merek AS merk,
         m.motor_merek AS motor_merk,
@@ -882,11 +987,11 @@ class OperationsRepository {
         c.cabang_kode AS kode_cabang,
         c.cabang_nama AS nama_cabang,
         'Budi Santoso'::VARCHAR AS nama_kasir
-      FROM "WORK_ORDER" wo
+      FROM ${woSource} wo
       JOIN "MOTOR" m ON m.motor_nopol = wo.motor_nopol
       JOIN ${customerSource} p ON p.pelanggan_id = m.pelanggan_id
       JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
-      WHERE wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar'
+      ${wherePaidSql}
       ORDER BY COALESCE(wo.work_tgl_selesai, wo.work_tgl_masuk) DESC, wo.work_no DESC;
     `;
     const { rows } = await db.query(sql);
@@ -1004,4 +1109,21 @@ class OperationsRepository {
   }
 }
 
-module.exports = new OperationsRepository();
+const operationsRepositoryInstance = new OperationsRepository();
+const getWorkOrderById = operationsRepositoryInstance.getWorkOrderById.bind(
+  operationsRepositoryInstance
+);
+
+module.exports = Object.assign(operationsRepositoryInstance, {
+  getWorkOrderById,
+  getAllWorkOrders: operationsRepositoryInstance.getAllWorkOrders.bind(operationsRepositoryInstance),
+  getWorkOrderDetail: operationsRepositoryInstance.getWorkOrderDetail.bind(operationsRepositoryInstance),
+  createWorkOrder: operationsRepositoryInstance.createWorkOrder.bind(operationsRepositoryInstance),
+  updateWorkOrder: operationsRepositoryInstance.updateWorkOrder.bind(operationsRepositoryInstance),
+  addServiceToWorkOrder: operationsRepositoryInstance.addServiceToWorkOrder.bind(operationsRepositoryInstance),
+  removeServiceFromWorkOrder: operationsRepositoryInstance.removeServiceFromWorkOrder.bind(operationsRepositoryInstance),
+  addSparepartToWorkOrder: operationsRepositoryInstance.addSparepartToWorkOrder.bind(operationsRepositoryInstance),
+  removeSparepartFromWorkOrder: operationsRepositoryInstance.removeSparepartFromWorkOrder.bind(operationsRepositoryInstance),
+  getAllPayments: operationsRepositoryInstance.getAllPayments.bind(operationsRepositoryInstance),
+  createPayment: operationsRepositoryInstance.createPayment.bind(operationsRepositoryInstance),
+});

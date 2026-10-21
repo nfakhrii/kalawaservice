@@ -104,8 +104,8 @@ export default function BranchRevenueReportPage() {
               className="px-2.5 py-1.5 bg-[#f6f8fa] border border-[#d0d7de] rounded-md"
             >
               <option value="">Semua Cabang</option>
-              {branchBreakdown.map((b) => (
-                <option key={b.cabang_id} value={b.cabang_id}>
+              {branchBreakdown.map((b, index) => (
+                <option key={b.cabang_id || b.kode_cabang || index} value={b.cabang_id || b.kode_cabang}>
                   {b.kode_cabang} — {b.nama_cabang}
                 </option>
               ))}
@@ -188,8 +188,8 @@ export default function BranchRevenueReportPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#d0d7de] text-xs">
-              {branchBreakdown.map((b) => (
-                <tr key={b.cabang_id}>
+              {branchBreakdown.map((b, index) => (
+                <tr key={b.cabang_id || b.kode_cabang || index}>
                   <td className="py-2 px-3 font-mono font-semibold text-[#0969da]">
                     {b.kode_cabang}
                   </td>
@@ -249,8 +249,8 @@ export default function BranchRevenueReportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#d0d7de] text-xs">
-                {rows.map((r) => (
-                  <tr key={r.pembayaran_id} className="hover:bg-[#f6f8fa]/70">
+                {rows.map((r, index) => (
+                  <tr key={r.pembayaran_id || r.work_no || index} className="hover:bg-[#f6f8fa]/70">
                     <td className="py-2.5 px-3 font-mono">
                       <div className="font-semibold text-[#1f2328]">{r.nomor_kwitansi}</div>
                       <div className="text-[10px] text-[#656d76]">

@@ -157,12 +157,14 @@ class OverviewRepository {
 
     const lowStockSql = `
       SELECT
-        sc.suku_cadang_kode AS id,
+        (st.cabang_kode || '-' || sc.suku_cadang_kode) AS id,
+        (st.cabang_kode || '-' || sc.suku_cadang_kode) AS suku_cadang_id,
         sc.suku_cadang_kode,
         sc.suku_cadang_kode AS kode_sku,
         sc.suku_cadang_nama AS nama_part,
         sc.suku_cadang_nama,
         'SUKU CADANG'::VARCHAR AS kategori,
+        'PCS'::VARCHAR AS satuan,
         sc.suku_cadang_harga_satuan AS harga_jual,
         st.cabang_kode,
         cb.cabang_nama,
@@ -218,7 +220,12 @@ class OverviewRepository {
           WHEN p.plafon_kredit > 0 THEN ROUND(((p.plafon_kredit - p.sisa_plafon)::NUMERIC / p.plafon_kredit) * 100, 2)
           ELSE 0
         END AS persentase_utilisasi,
+        CASE
+          WHEN p.plafon_kredit > 0 THEN ROUND(((p.plafon_kredit - p.sisa_plafon)::NUMERIC / p.plafon_kredit) * 100, 2)
+          ELSE 0
+        END AS persentase_utilisasi_plafon,
         COUNT(DISTINCT m.motor_nopol) AS jumlah_unit_armada,
+        COUNT(DISTINCT m.motor_nopol) AS total_unit_armada,
         COUNT(DISTINCT tk.tagihan_id) FILTER (WHERE tk.status_tagihan IN ('Belum Dibayar', 'Belum Lunas')) AS tagihan_outstanding_count
       FROM ${customerSource} p
       LEFT JOIN "KONTRAK_KORPORAT" kk ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'

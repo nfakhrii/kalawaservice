@@ -450,7 +450,9 @@ GRANT SELECT ON
     "JASA_SERVIS", "SUKU_CADANG", "STOK_CABANG", "SUPPLIER", "SUPPLIER_SUKU_CADANG",
     "WO_MEKANIK", "WO_JASA", "WO_SUKU_CADANG", "GARANSI",
     "VW_PELANGGAN_AMAN", "VW_WORK_ORDER_AMAN"
-TO role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang, role_auditor;
+TO role_owner, role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang, role_auditor;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO role_owner;
 
 -- Pastikan REVOKE sensitif dari Kelompok1_admin_security.sql tetap terkunci rapat:
 REVOKE SELECT ON "PELANGGAN" FROM role_kasir, role_mekanik, role_auditor, role_petugas_gudang;

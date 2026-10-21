@@ -128,8 +128,8 @@ export default function VehicleHistoryReportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#d0d7de] text-xs">
-                {rows.map((r) => (
-                  <tr key={r.work_order_id} className="hover:bg-[#f6f8fa]/70">
+                {rows.map((r, index) => (
+                  <tr key={r.work_order_id || r.work_no || index} className="hover:bg-[#f6f8fa]/70">
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <span className="font-mono font-bold px-2 py-0.5 rounded bg-slate-100 border border-[#d0d7de]">
                         {r.plat_nomor}
