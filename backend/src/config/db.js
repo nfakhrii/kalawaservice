@@ -157,6 +157,16 @@ const query = (text, params = []) => {
  */
 async function resetAndSeedDatabase() {
   const dbDir = path.resolve(__dirname, '../../../database');
+
+  const executedFiles = [
+    'Kelompok1_schema.sql',
+    'Kelompok1_insert.sql',
+    'Kelompok1_admin_security.sql',
+    'Kelompok1_programming.sql',
+    'Kelompok1_migration_tugas4.sql',
+  ];
+
+  // Baca semua file SQL secara sinkron (karena hanya dijalankan sekali saat reset)
   const schemaSql = fs.readFileSync(path.join(dbDir, 'Kelompok1_schema.sql'), 'utf8');
   const insertSql = fs.readFileSync(path.join(dbDir, 'Kelompok1_insert.sql'), 'utf8');
   const securitySql = fs.readFileSync(path.join(dbDir, 'Kelompok1_admin_security.sql'), 'utf8');
@@ -209,6 +219,7 @@ async function resetAndSeedDatabase() {
     return {
       success: true,
       timestamp: new Date().toISOString(),
+      executedFiles,
     };
   } finally {
     client.release();
