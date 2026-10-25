@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatRupiah } from '../../utils/formatters';
@@ -15,6 +16,7 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState(null);
+  const { token } = useAuth();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -31,25 +33,50 @@ export default function CustomersPage() {
     sisa_plafon: 0,
   });
 
-  const loadCustomers = async () => {
-    setLoading(true);
+  const loadCustomers = async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+    }
+  
     try {
       const res = await api.getCustomers();
       setCustomers(res.data || []);
     } catch (err) {
-      setAlert(null);
-    
-      window.alert(
-        `Gagal memuat data pelanggan.\n\n${err.message || 'Terjadi kesalahan pada server.'}`
-      );
+      // Jangan tampilkan popup berulang ketika polling berjalan.
+      if (!silent) {
+        window.alert(
+          `Gagal memuat data pelanggan.\n\n${
+            err.message || 'Terjadi kesalahan pada server.'
+          }`
+        );
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
+    if (!token) {
+      setCustomers([]);
+      return;
+    }
+  
+    // Ambil data saat halaman dibuka atau role berubah.
+    setCustomers([]);
     loadCustomers();
-  }, []);
+  
+    // Periksa apakah ada data baru setiap 5 detik.
+    const intervalId = setInterval(() => {
+      loadCustomers({ silent: true });
+    }, 5000);
+  
+    // Hentikan polling saat komponen dilepas atau token berubah.
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [token]);
 
   const filtered = customers.filter((c) => {
     if (filterTab !== 'ALL' && c.tipe_pelanggan !== filterTab) return false;

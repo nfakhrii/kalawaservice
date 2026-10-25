@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { Plus, Search, ArrowUpRight, RefreshCw } from 'lucide-react';
 import { api } from '../../services/api';
@@ -17,6 +18,7 @@ export default function WorkOrdersListPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState(null);
+  const { token } = useAuth();
 
   const loadWorkOrders = async () => {
     setLoading(true);
@@ -32,8 +34,10 @@ export default function WorkOrdersListPage() {
   };
 
   useEffect(() => {
+    setWorkOrders([]);
+    setCounts({});
     loadWorkOrders();
-  }, []);
+  }, [token]);
 
   const filtered = workOrders.filter((wo) => {
     if (statusFilter !== 'ALL' && wo.status !== statusFilter) return false;
