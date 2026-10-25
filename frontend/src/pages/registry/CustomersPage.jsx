@@ -8,6 +8,7 @@ import {
   ModalDialog,
   AlertBanner,
   EmptyState,
+  FeedbackModal,
 } from '../../components/ui/GitHubComponents';
 
 export default function CustomersPage() {
@@ -20,6 +21,30 @@ export default function CustomersPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [feedback, setFeedback] = useState({
+    isOpen: false,
+    type: 'error',
+    title: '',
+    message: '',
+  });
+
+  const showFeedback = (type, title, message) => {
+    setFeedback({
+      isOpen: true,
+      type,
+      title,
+      message,
+    });
+  };
+
+  const closeFeedback = () => {
+    setFeedback((prev) => ({
+      ...prev,
+      isOpen: false,
+    }));
+  };
   const [formData, setFormData] = useState({
     kode_pelanggan: '',
     nama_pelanggan: '',
@@ -131,49 +156,49 @@ export default function CustomersPage() {
     setIsModalOpen(true);
   };
 
-  
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
     setAlert(null);
 
-    try {
-      // Buat payload tanpa field email.
-      const {
-        email,
-        ...customerPayload
-      } = formData;
+    const isEditing = Boolean(editingItem);
+    const customerName = formData.nama_pelanggan;
+    const customerCode = formData.kode_pelanggan;
 
-      if (editingItem) {
-        await api.updateCustomer(
-          editingItem.id,
-          customerPayload
-        );
+    try {
+      const { email, ...customerPayload } = formData;
+
+      if (isEditing) {
+        await api.updateCustomer(editingItem.id, customerPayload);
       } else {
         await api.createCustomer(customerPayload);
       }
 
-      // Tutup modal setelah operasi berhasil.
       setIsModalOpen(false);
 
-      // Ambil data terbaru melalui API tanpa reload browser.
-      await loadCustomers();
-
-      setAlert({
-        type: 'success',
-        title: editingItem
-          ? 'Berhasil Diperbarui'
-          : 'Pelanggan Baru Ditambahkan',
-        message: editingItem
-          ? `Data pelanggan ${formData.nama_pelanggan} telah diperbarui.`
-          : `Pelanggan ${formData.nama_pelanggan} (${formData.kode_pelanggan}) berhasil disimpan.`,
-      });
-    } catch (err) {
-      // Tutup modal dan tampilkan popup error.
-      setIsModalOpen(false);
-
-      window.alert(
-        `Gagal menyimpan data pelanggan.\n\n${err.message || 'Terjadi kesalahan pada server.'}`
+      showFeedback(
+        'success',
+        isEditing ? 'Pelanggan Berhasil Diperbarui' : 'Pelanggan Berhasil Ditambahkan',
+        isEditing
+          ? `Data pelanggan ${customerName} berhasil diperbarui.`
+          : `Pelanggan ${customerName} (${customerCode}) berhasil disimpan.`
       );
+
+      // Muat ulang data setelah operasi CRUD berhasil.
+      await loadCustomers({ silent: true });
+    } catch (err) {
+      setIsModalOpen(false);
+
+      showFeedback(
+        'error',
+        isEditing ? 'Gagal Memperbarui Pelanggan' : 'Gagal Menambahkan Pelanggan',
+        err.message || 'Terjadi kesalahan pada server. Silakan coba kembali.'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
   
@@ -193,14 +218,16 @@ export default function CustomersPage() {
 
       await loadCustomers();
 
-      setAlert({
-        type: 'success',
-        title: 'Pelanggan Dihapus',
-        message: `Data ${item.nama_pelanggan} berhasil dihapus.`,
-      });
+      showFeedback(
+        'success',
+        'Pelanggan Berhasil Dihapus',
+        `Data ${item.nama_pelanggan} berhasil dihapus.`
+      );
     } catch (err) {
-      window.alert(
-        `Penghapusan pelanggan gagal.\n\n${err.message || 'Terjadi kesalahan pada server.'}`
+      showFeedback(
+        'error',
+        'Gagal Menghapus Pelanggan',
+        err.message || 'Terjadi kesalahan pada server.'
       );
     }
   };
@@ -518,20 +545,29 @@ export default function CustomersPage() {
           <div className="pt-3 border-t border-[#d0d7de] flex items-center justify-end gap-2">
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => setIsModalOpen(false)}
-              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328] font-medium"
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328] font-medium disabled:opacity-60"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Simpan Data Pelanggan
+              {isSubmitting ? 'Menyimpan...' : 'Simpan Data Pelanggan'}
             </button>
           </div>
         </form>
       </ModalDialog>
+      <FeedbackModal
+        isOpen={feedback.isOpen}
+        type={feedback.type}
+        title={feedback.title}
+        message={feedback.message}
+        onClose={closeFeedback}
+      />
     </div>
   );
 }

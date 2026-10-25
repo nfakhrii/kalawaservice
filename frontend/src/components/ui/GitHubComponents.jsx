@@ -191,3 +191,90 @@ export function AlertBanner({ type = 'error', title, message, code, onClose }) {
   );
 }
 
+
+/**
+ * Popup feedback untuk pesan error atau sukses.
+ */
+export function FeedbackModal({
+  isOpen,
+  type = 'error',
+  title,
+  message,
+  onClose,
+}) {
+  if (!isOpen) return null;
+
+  const isSuccess = type === 'success';
+
+  const styles = isSuccess
+    ? {
+        icon: 'text-emerald-600 bg-emerald-50',
+        button: 'bg-[#1f883d] hover:bg-[#1a7f37]',
+      }
+    : {
+        icon: 'text-red-600 bg-red-50',
+        button: 'bg-red-600 hover:bg-red-700',
+      };
+
+  const Icon = isSuccess ? CheckCircle2 : AlertCircle;
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 backdrop-blur-[2px] p-4"
+      role="presentation"
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="feedback-modal-title"
+        aria-describedby="feedback-modal-message"
+        className="w-full max-w-md rounded-lg border border-[#d0d7de] bg-white shadow-2xl"
+      >
+        <div className="p-5">
+          <div className="flex items-start gap-3">
+            <div
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${styles.icon}`}
+            >
+              <Icon className="h-5 w-5" />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <h2
+                id="feedback-modal-title"
+                className="text-base font-semibold text-[#1f2328]"
+              >
+                {title || (isSuccess ? 'Berhasil' : 'Terjadi Kesalahan')}
+              </h2>
+
+              <p
+                id="feedback-modal-message"
+                className="mt-2 whitespace-pre-line break-words text-sm leading-relaxed text-[#656d76]"
+              >
+                {message || 'Silakan coba kembali.'}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Tutup popup"
+              className="rounded-md p-1 text-[#656d76] hover:bg-slate-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-5 flex justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className={`rounded-md px-4 py-2 text-sm font-semibold text-white ${styles.button}`}
+            >
+              Mengerti
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
