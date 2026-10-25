@@ -7,6 +7,7 @@ import {
   ModalDialog,
   AlertBanner,
   EmptyState,
+  FeedbackModal,
 } from '../../components/ui/GitHubComponents';
 
 export default function VehiclesPage() {
@@ -16,6 +17,29 @@ export default function VehiclesPage() {
   const [filterType, setFilterType] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState(null);
+
+  const [feedback, setFeedback] = useState({
+    isOpen: false,
+    type: 'error',
+    title: '',
+    message: '',
+  });
+  
+  const showFeedback = (type, title, message) => {
+    setFeedback({
+      isOpen: true,
+      type,
+      title,
+      message,
+    });
+  };
+  
+  const closeFeedback = () => {
+    setFeedback((prev) => ({
+      ...prev,
+      isOpen: false,
+    }));
+  };
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -125,23 +149,41 @@ export default function VehiclesPage() {
   };
 
   const handleDelete = async (v) => {
-    if (!window.confirm(`Hapus data motor ${v.plat_nomor}?`)) return;
-    setAlert(null);
+    if (!window.confirm(`Hapus data motor ${v.plat_nomor}?`)) {
+      return;
+    }
+  
     try {
       await api.deleteVehicle(v.id);
-      setAlert({
-        type: 'success',
-        title: 'Motor Dihapus',
-        message: `Unit ${v.plat_nomor} berhasil dihapus.`,
-      });
-      loadData();
+  
+      showFeedback(
+        'success',
+        'Motor Berhasil Dihapus',
+        `Data motor ${v.plat_nomor} berhasil dihapus.`
+      );
+  
+      await loadData();
     } catch (err) {
-      setAlert({
-        type: 'error',
-        title: `Gagal Menghapus (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
-      });
+      let message =
+        'Terjadi kesalahan pada server. Silakan coba kembali.';
+  
+      if (
+        err.code === 'FOREIGN_KEY_VIOLATION' ||
+        err.code === '23503'
+      ) {
+        message =
+          'Motor tidak dapat dihapus karena masih memiliki riwayat kepemilikan atau transaksi yang terkait. Periksa data terkait terlebih dahulu.';
+      } else if (err.status === 403) {
+        message = 'Kamu tidak memiliki izin untuk menghapus data motor.';
+      } else if (err.message) {
+        message = err.message;
+      }
+  
+      showFeedback(
+        'error',
+        'Gagal Menghapus Motor',
+        message
+      );
     }
   };
 
@@ -420,6 +462,13 @@ export default function VehiclesPage() {
           </div>
         </form>
       </ModalDialog>
+      <FeedbackModal
+        isOpen={feedback.isOpen}
+        type={feedback.type}
+        title={feedback.title}
+        message={feedback.message}
+        onClose={closeFeedback}
+      />
     </div>
   );
 }

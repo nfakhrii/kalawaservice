@@ -424,14 +424,85 @@ class RegistryRepository {
     return rows[0] || null;
   }
 
+  
   async deleteVehicle(id) {
-    const sql = `
-      DELETE FROM "MOTOR"
-      WHERE UPPER(motor_nopol) = $1
-      RETURNING motor_nopol AS id, motor_nopol AS plat_nomor, motor_merek AS merk, motor_tipe AS tipe;
-    `;
-    const { rows } = await db.query(sql, [String(id).trim().toUpperCase()]);
-    return rows[0] || null;
+    const nopol = String(id).trim().toUpperCase();
+
+    return await db.withTransaction(async (client) => {
+      // 1. Pastikan motor tersedia dan kunci barisnya.
+      const motorResult = await client.query(
+        `
+          SELECT motor_nopol
+          FROM "MOTOR"
+          WHERE UPPER(TRIM(motor_nopol)) = $1
+          FOR UPDATE;
+        `,
+        [nopol]
+      );
+
+      if (motorResult.rows.length === 0) {
+        return null;
+      }
+
+      // Gunakan nopol asli dari database.
+      const actualNopol = motorResult.rows[0].motor_nopol;
+
+      // 2. Hapus seluruh riwayat kepemilikan motor.
+      const historyResult = await client.query(
+        `
+          DELETE FROM "RIWAYAT_KEPEMILIKAN"
+          WHERE motor_nopol = $1
+          RETURNING riwayat_id, motor_nopol;
+        `,
+        [actualNopol]
+      );
+
+      console.log('[deleteVehicle] Riwayat dihapus:', {
+        nopol: actualNopol,
+        jumlah: historyResult.rowCount,
+        rows: historyResult.rows,
+      });
+
+      // 3. Pastikan tidak ada riwayat yang tersisa.
+      const remainingResult = await client.query(
+        `
+          SELECT riwayat_id, motor_nopol
+          FROM "RIWAYAT_KEPEMILIKAN"
+          WHERE motor_nopol = $1;
+        `,
+        [actualNopol]
+      );
+
+      if (remainingResult.rowCount > 0) {
+        const error = new Error(
+          `Masih terdapat ${remainingResult.rowCount} riwayat kepemilikan untuk motor ${actualNopol}.`
+        );
+        error.code = 'VEHICLE_HISTORY_REMAINS';
+        error.details = remainingResult.rows;
+        throw error;
+      }
+
+      // 4. Hapus motor setelah riwayat berhasil dibersihkan.
+      const motorDeleteResult = await client.query(
+        `
+          DELETE FROM "MOTOR"
+          WHERE motor_nopol = $1
+          RETURNING
+            motor_nopol AS id,
+            motor_nopol AS plat_nomor,
+            motor_merek AS merk,
+            motor_tipe AS tipe;
+        `,
+        [actualNopol]
+      );
+
+      console.log('[deleteVehicle] Motor dihapus:', {
+        nopol: actualNopol,
+        jumlah: motorDeleteResult.rowCount,
+      });
+
+      return motorDeleteResult.rows[0] || null;
+    });
   }
 
   // ==========================================================================
