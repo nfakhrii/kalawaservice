@@ -1,29 +1,86 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+} from 'react';
 import { api } from '../services/api';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('kalawa_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(() => {
+    return localStorage.getItem('kalawa_token');
   });
-  const [token, setToken] = useState(() => localStorage.getItem('kalawa_token') || null);
+
   const [loading, setLoading] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const clearSession = () => {
+    localStorage.removeItem('kalawa_token');
+    localStorage.removeItem('kalawa_user');
+    setToken(null);
+    setUser(null);
+  };
 
   const saveSession = (newToken, newUser) => {
     localStorage.setItem('kalawa_token', newToken);
     localStorage.setItem('kalawa_user', JSON.stringify(newUser));
+
     setToken(newToken);
     setUser(newUser);
   };
 
+  // Validasi sesi saat aplikasi pertama kali dibuka.
+  // Tidak melakukan login otomatis.
+  useEffect(() => {
+    let active = true;
+
+    const validateSession = async () => {
+      const savedToken = localStorage.getItem('kalawa_token');
+
+      if (!savedToken) {
+        clearSession();
+        if (active) setCheckingAuth(false);
+        return;
+      }
+
+      try {
+        // Endpoint ini harus mengirim Authorization: Bearer token.
+        const res = await api.getMe();
+
+        if (!active) return;
+
+        const authenticatedUser = res.data;
+
+        localStorage.setItem(
+          'kalawa_user',
+          JSON.stringify(authenticatedUser)
+        );
+
+        setToken(savedToken);
+        setUser(authenticatedUser);
+      } catch {
+        if (active) {
+          clearSession();
+        }
+      } finally {
+        if (active) setCheckingAuth(false);
+      }
+    };
+
+    validateSession();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const login = async (username, password) => {
     setLoading(true);
+
     try {
       const res = await api.login(username, password);
       saveSession(res.data.token, res.data.user);
@@ -35,6 +92,7 @@ export function AuthProvider({ children }) {
 
   const quickSwitchRole = async (role) => {
     setLoading(true);
+
     try {
       const res = await api.quickSwitchRole(role);
       saveSession(res.data.token, res.data.user);
@@ -45,24 +103,8 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
-    localStorage.removeItem('kalawa_token');
-    localStorage.removeItem('kalawa_user');
-    setToken(null);
-    setUser(null);
+    clearSession();
   };
-
-  // Jika belum ada sesi saat pertama kali dibuka, inisialisasi sesi default demo
-  // menggunakan autentikasi akun PostgreSQL asli user_admin_cabang
-  useEffect(() => {
-    if (!token || !user) {
-      api
-        .login('user_admin_cabang', 'AdminKalawa123')
-        .then((res) => {
-          saveSession(res.data.token, res.data.user);
-        })
-        .catch(() => {});
-    }
-  }, []);
 
   return (
     <AuthContext.Provider
@@ -70,6 +112,7 @@ export function AuthProvider({ children }) {
         user,
         token,
         loading,
+        checkingAuth,
         isAuthenticated: Boolean(token && user),
         login,
         quickSwitchRole,
@@ -83,8 +126,10 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
+
   if (!ctx) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
+
   return ctx;
 }

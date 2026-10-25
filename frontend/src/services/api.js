@@ -43,9 +43,27 @@ export async function apiRequest(endpoint, options = {}) {
 export const api = {
   // Auth
   login: (username, password) =>
-    apiRequest('/auth/login', { method: 'POST', body: { username, password } }),
+    apiRequest('/auth/login', {
+      method: 'POST',
+      body: { username, password },
+    }),
+
+  getMe: async () => {
+    const response = await apiRequest('/auth/me');
+
+    // Backend mengembalikan { success: true, data: req.user }
+    return {
+      ...response,
+      data: response.data,
+    };
+  },
+
   quickSwitchRole: (role) =>
-    apiRequest('/auth/quick-switch', { method: 'POST', body: { role } }),
+    apiRequest('/auth/quick-switch', {
+      method: 'POST',
+      body: { role },
+    }),
+
   getDemoUsers: () => apiRequest('/auth/demo-users'),
 
   // Overview

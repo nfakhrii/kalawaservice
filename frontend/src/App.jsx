@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import AppShell from './components/layout/AppShell';
 import LoginPage from './pages/auth/LoginPage';
 import OverviewPage from './pages/overview/OverviewPage';
@@ -35,19 +35,74 @@ import LowStockReportPage from './pages/analytics/LowStockReportPage';
 // System Diagnostics Module
 import SystemDiagnosticsPage from './pages/diagnostics/SystemDiagnosticsPage';
 
+
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, checkingAuth } = useAuth();
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-sm text-gray-500">
+          Memeriksa sesi pengguna...
+        </p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/auth/login" replace />;
+  }
+
+  return children;
+}
+
+function PublicRoute({ children }) {
+  const { isAuthenticated, checkingAuth } = useAuth();
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-sm text-gray-500">
+          Memeriksa sesi pengguna...
+        </p>
+      </div>
+    );
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/app/overview" replace />;
+  }
+
+  return children;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
           {/* Root redirect to /app/overview */}
-          <Route path="/" element={<Navigate to="/app/overview" replace />} />
+          <Route path="/" element={<Navigate to="/auth/login" replace />} />
 
           {/* Authentication Route */}
-          <Route path="/auth/login" element={<LoginPage />} />
+          <Route
+            path="/auth/login"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
 
           {/* Main Application Nested Subpath Routes */}
-          <Route path="/app" element={<AppShell />}>
+          <Route
+            path="/app"
+            element={
+              <ProtectedRoute>
+                <AppShell />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Navigate to="/app/overview" replace />} />
             <Route path="overview" element={<OverviewPage />} />
 
@@ -91,7 +146,7 @@ export default function App() {
           </Route>
 
           {/* Fallback */}
-          <Route path="*" element={<Navigate to="/app/overview" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

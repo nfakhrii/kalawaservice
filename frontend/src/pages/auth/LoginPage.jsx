@@ -9,8 +9,8 @@ export default function LoginPage() {
   const { login, quickSwitchRole, user, loading } = useAuth();
   const navigate = useNavigate();
 
-  const [username, setUsername] = useState('user_admin_cabang');
-  const [password, setPassword] = useState('AdminKalawa123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
 
   const handleManualLogin = async (e) => {
