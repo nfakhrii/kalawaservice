@@ -22,7 +22,6 @@ export default function CustomersPage() {
     kode_pelanggan: '',
     nama_pelanggan: '',
     telepon: '',
-    email: '',
     alamat: '',
     tipe_pelanggan: 'INDIVIDU',
     nama_perusahaan: '',
@@ -38,7 +37,11 @@ export default function CustomersPage() {
       const res = await api.getCustomers();
       setCustomers(res.data || []);
     } catch (err) {
-      setAlert({ type: 'error', title: 'Gagal memuat data pelanggan', message: err.message });
+      setAlert(null);
+    
+      window.alert(
+        `Gagal memuat data pelanggan.\n\n${err.message || 'Terjadi kesalahan pada server.'}`
+      );
     } finally {
       setLoading(false);
     }
@@ -73,7 +76,6 @@ export default function CustomersPage() {
       kode_pelanggan: `PL${nextNum}`,
       nama_pelanggan: '',
       telepon: '',
-      email: '',
       alamat: '',
       tipe_pelanggan: filterTab === 'KORPORAT' ? 'KORPORAT' : 'INDIVIDU',
       nama_perusahaan: '',
@@ -91,7 +93,6 @@ export default function CustomersPage() {
       kode_pelanggan: item.kode_pelanggan,
       nama_pelanggan: item.nama_pelanggan,
       telepon: item.telepon || '',
-      email: item.email || '',
       alamat: item.alamat || '',
       tipe_pelanggan: item.tipe_pelanggan || 'INDIVIDU',
       nama_perusahaan: item.nama_perusahaan || '',
@@ -103,55 +104,77 @@ export default function CustomersPage() {
     setIsModalOpen(true);
   };
 
+  
   const handleSubmit = async (e) => {
     e.preventDefault();
     setAlert(null);
+
     try {
+      // Buat payload tanpa field email.
+      const {
+        email,
+        ...customerPayload
+      } = formData;
+
       if (editingItem) {
-        await api.updateCustomer(editingItem.id, formData);
-        setAlert({
-          type: 'success',
-          title: 'Berhasil Diperbarui',
-          message: `Data pelanggan ${formData.nama_pelanggan} telah diperbarui.`,
-        });
+        await api.updateCustomer(
+          editingItem.id,
+          customerPayload
+        );
       } else {
-        await api.createCustomer(formData);
-        setAlert({
-          type: 'success',
-          title: 'Pelanggan Baru Ditambahkan',
-          message: `Pelanggan ${formData.nama_pelanggan} (${formData.kode_pelanggan}) berhasil disimpan.`,
-        });
+        await api.createCustomer(customerPayload);
       }
+
+      // Tutup modal setelah operasi berhasil.
       setIsModalOpen(false);
-      loadCustomers();
-    } catch (err) {
+
+      // Ambil data terbaru melalui API tanpa reload browser.
+      await loadCustomers();
+
       setAlert({
-        type: 'error',
-        title: `Gagal Menyimpan (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
+        type: 'success',
+        title: editingItem
+          ? 'Berhasil Diperbarui'
+          : 'Pelanggan Baru Ditambahkan',
+        message: editingItem
+          ? `Data pelanggan ${formData.nama_pelanggan} telah diperbarui.`
+          : `Pelanggan ${formData.nama_pelanggan} (${formData.kode_pelanggan}) berhasil disimpan.`,
       });
+    } catch (err) {
+      // Tutup modal dan tampilkan popup error.
+      setIsModalOpen(false);
+
+      window.alert(
+        `Gagal menyimpan data pelanggan.\n\n${err.message || 'Terjadi kesalahan pada server.'}`
+      );
     }
   };
-
+  
   const handleDelete = async (item) => {
-    if (!window.confirm(`Hapus pelanggan ${item.nama_pelanggan} (${item.kode_pelanggan})?`)) return;
+    if (
+      !window.confirm(
+        `Hapus pelanggan ${item.nama_pelanggan} (${item.kode_pelanggan})?`
+      )
+    ) {
+      return;
+    }
+
     setAlert(null);
+
     try {
       await api.deleteCustomer(item.id);
+
+      await loadCustomers();
+
       setAlert({
         type: 'success',
         title: 'Pelanggan Dihapus',
         message: `Data ${item.nama_pelanggan} berhasil dihapus.`,
       });
-      loadCustomers();
     } catch (err) {
-      setAlert({
-        type: 'error',
-        title: `Penghapusan Ditolak (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
-      });
+      window.alert(
+        `Penghapusan pelanggan gagal.\n\n${err.message || 'Terjadi kesalahan pada server.'}`
+      );
     }
   };
 
@@ -447,21 +470,20 @@ export default function CustomersPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Email</label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Alamat</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Alamat
+              </label>
               <input
                 type="text"
                 value={formData.alamat}
-                onChange={(e) => setFormData({ ...formData, alamat: e.target.value })}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    alamat: e.target.value,
+                  }))
+                }
                 className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
+                placeholder="Alamat pelanggan"
               />
             </div>
           </div>
