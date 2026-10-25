@@ -184,7 +184,8 @@ CREATE TABLE "RIWAYAT_KEPEMILIKAN" (
 
     CONSTRAINT "fk_riwayat_motor"
         FOREIGN KEY ("motor_nopol")
-        REFERENCES "MOTOR" ("motor_nopol"),
+        REFERENCES "MOTOR" ("motor_nopol")
+        ON UPDATE CASCADE,
 
     CONSTRAINT "fk_riwayat_pelanggan"
         FOREIGN KEY ("pelanggan_id")

@@ -369,61 +369,136 @@ class RegistryRepository {
   }
 
   async updateVehicle(id, data) {
-    const nopol = String(id).trim().toUpperCase();
+    const nopolLama = String(id).trim().toUpperCase();
+
+    const nopolBaru = String(
+      data.motor_nopol || data.plat_nomor || id
+    )
+      .trim()
+      .toUpperCase();
+
     const pelangganId = String(data.pelanggan_id).trim();
-    const merek = String(data.motor_merek || data.motor_merk || data.merk).trim();
+    const merek = String(
+      data.motor_merek || data.motor_merk || data.merk
+    ).trim();
     const tipe = String(data.motor_tipe || data.tipe).trim();
     const tahun = Number(data.motor_tahun || data.tahun || 2024);
-    const warna = String(data.motor_warna || data.warna || 'Hitam').trim();
-    const noRangka = String(data.motor_no_rangka || data.nomor_rangka)
+    const warna = String(
+      data.motor_warna || data.warna || 'Hitam'
+    ).trim();
+    const noRangka = String(
+      data.motor_no_rangka || data.nomor_rangka
+    )
       .trim()
       .toUpperCase();
-    const noMesin = String(data.motor_no_mesin || data.nomor_mesin || '-')
+    const noMesin = String(
+      data.motor_no_mesin || data.nomor_mesin || '-'
+    )
       .trim()
       .toUpperCase();
-    const km = Number(data.motor_kilometer || data.kilometer_terakhir || 0);
+    const km = Number(
+      data.motor_kilometer ?? data.kilometer_terakhir ?? 0
+    );
 
-    const sql = `
-      UPDATE "MOTOR"
-      SET
-        pelanggan_id = $1,
-        motor_merek = $2,
-        motor_tipe = $3,
-        motor_tahun = $4,
-        motor_warna = $5,
-        motor_no_rangka = $6,
-        motor_no_mesin = $7,
-        motor_kilometer = $8
-      WHERE UPPER(motor_nopol) = $9
-      RETURNING
-        motor_nopol AS id,
-        motor_nopol,
-        motor_nopol AS plat_nomor,
-        pelanggan_id,
-        motor_merek AS merk,
-        motor_merek AS motor_merk,
-        motor_tipe AS tipe,
-        motor_tahun AS tahun,
-        motor_warna AS warna,
-        motor_no_rangka AS nomor_rangka,
-        motor_no_mesin AS nomor_mesin,
-        motor_kilometer AS kilometer_terakhir;
-    `;
-    const params = [
-      pelangganId,
-      merek,
-      tipe,
-      tahun,
-      warna,
-      noRangka,
-      noMesin,
-      km,
-      nopol,
-    ];
-    const { rows } = await db.query(sql, params);
-    return rows[0] || null;
+    return await db.withTransaction(async (client) => {
+      // Pastikan motor lama ditemukan dan kunci barisnya.
+      const existingResult = await client.query(
+        `
+          SELECT motor_nopol
+          FROM "MOTOR"
+          WHERE UPPER(TRIM(motor_nopol)) = $1
+          FOR UPDATE;
+        `,
+        [nopolLama]
+      );
+
+      if (existingResult.rowCount === 0) {
+        return null;
+      }
+
+      const nopolAsli = existingResult.rows[0].motor_nopol;
+
+      // Jika plat berubah, pastikan plat baru belum digunakan.
+      if (nopolBaru !== nopolAsli) {
+        const duplicateResult = await client.query(
+          `
+            SELECT 1
+            FROM "MOTOR"
+            WHERE UPPER(TRIM(motor_nopol)) = $1
+              AND motor_nopol <> $2
+            LIMIT 1;
+          `,
+          [nopolBaru, nopolAsli]
+        );
+
+        if (duplicateResult.rowCount > 0) {
+          const error = new Error(
+            `Plat nomor ${nopolBaru} sudah digunakan oleh motor lain.`
+          );
+          error.code = 'DUPLICATE_VEHICLE_PLATE';
+          error.status = 409;
+          throw error;
+        }
+      }
+
+      // Perbarui data motor, termasuk primary key jika plat berubah.
+      const updateResult = await client.query(
+        `
+          UPDATE "MOTOR"
+          SET
+            motor_nopol = $1,
+            pelanggan_id = $2,
+            motor_merek = $3,
+            motor_tipe = $4,
+            motor_tahun = $5,
+            motor_warna = $6,
+            motor_no_rangka = $7,
+            motor_no_mesin = $8,
+            motor_kilometer = $9
+          WHERE motor_nopol = $10
+          RETURNING
+            motor_nopol AS id,
+            motor_nopol,
+            motor_nopol AS plat_nomor,
+            pelanggan_id,
+            motor_merek AS merk,
+            motor_merek AS motor_merk,
+            motor_tipe AS tipe,
+            motor_tahun AS tahun,
+            motor_warna AS warna,
+            motor_no_rangka AS nomor_rangka,
+            motor_no_mesin AS nomor_mesin,
+            motor_kilometer AS kilometer_terakhir;
+        `,
+        [
+          nopolBaru,
+          pelangganId,
+          merek,
+          tipe,
+          tahun,
+          warna,
+          noRangka,
+          noMesin,
+          km,
+          nopolAsli,
+        ]
+      );
+
+      // Sinkronkan foreign key pada riwayat kepemilikan.
+      if (nopolBaru !== nopolAsli) {
+        await client.query(
+          `
+            UPDATE "RIWAYAT_KEPEMILIKAN"
+            SET motor_nopol = $1
+            WHERE motor_nopol = $2;
+          `,
+          [nopolBaru, nopolAsli]
+        );
+      }
+
+      return updateResult.rows[0] || null;
+    });
   }
-
   
   async deleteVehicle(id) {
     const nopol = String(id).trim().toUpperCase();
@@ -457,12 +532,6 @@ class RegistryRepository {
         [actualNopol]
       );
 
-      console.log('[deleteVehicle] Riwayat dihapus:', {
-        nopol: actualNopol,
-        jumlah: historyResult.rowCount,
-        rows: historyResult.rows,
-      });
-
       // 3. Pastikan tidak ada riwayat yang tersisa.
       const remainingResult = await client.query(
         `
@@ -495,11 +564,6 @@ class RegistryRepository {
         `,
         [actualNopol]
       );
-
-      console.log('[deleteVehicle] Motor dihapus:', {
-        nopol: actualNopol,
-        jumlah: motorDeleteResult.rowCount,
-      });
 
       return motorDeleteResult.rows[0] || null;
     });
