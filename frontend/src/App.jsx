@@ -56,6 +56,50 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+
+function RoleProtectedRoute({ children, allowedRoles }) {
+  const { user, isAuthenticated, checkingAuth } = useAuth();
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-sm text-gray-500">
+          Memeriksa sesi pengguna...
+        </p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/auth/login" replace />;
+  }
+
+  const role = String(user?.role || '').toLowerCase().trim();
+  const allowed = allowedRoles.map((item) =>
+    String(item).toLowerCase().trim()
+  );
+
+  if (!allowed.includes(role)) {
+    return <Navigate to="/app/overview" replace />;
+  }
+
+  return children;
+}
+
+function RegistryIndexRedirect() {
+  const { user } = useAuth();
+  const role = String(user?.role || '').toLowerCase().trim();
+
+  const destination =
+    role === 'gudang'
+      ? '/app/registry/spareparts'
+      : role === 'mekanik'
+        ? '/app/registry/vehicles'
+        : '/app/registry/customers';
+
+  return <Navigate to={destination} replace />;
+}
+
 function PublicRoute({ children }) {
   const { isAuthenticated, checkingAuth } = useAuth();
 
@@ -105,15 +149,95 @@ export default function App() {
           >
             <Route index element={<Navigate to="/app/overview" replace />} />
             <Route path="overview" element={<OverviewPage />} />
-
+            
             {/* Master Data CRUD Registry */}
             <Route path="registry" element={<RegistryLayout />}>
-              <Route index element={<Navigate to="/app/registry/customers" replace />} />
-              <Route path="customers" element={<CustomersPage />} />
-              <Route path="vehicles" element={<VehiclesPage />} />
-              <Route path="services" element={<ServicesPage />} />
-              <Route path="spareparts" element={<SparepartsPage />} />
-              <Route path="suppliers" element={<SuppliersPage />} />
+              <Route index element={<RegistryIndexRedirect />} />
+
+              <Route
+                path="customers"
+                element={
+                  <RoleProtectedRoute
+                    allowedRoles={[
+                      'owner',
+                      'admin_cabang',
+                      'kasir',
+                      'mekanik',
+                      'auditor',
+                    ]}
+                  >
+                    <CustomersPage />
+                  </RoleProtectedRoute>
+                }
+              />
+
+              <Route
+                path="vehicles"
+                element={
+                  <RoleProtectedRoute
+                    allowedRoles={[
+                      'owner',
+                      'admin_cabang',
+                      'kasir',
+                      'mekanik',
+                      'auditor',
+                    ]}
+                  >
+                    <VehiclesPage />
+                  </RoleProtectedRoute>
+                }
+              />
+
+              <Route
+                path="services"
+                element={
+                  <RoleProtectedRoute
+                    allowedRoles={[
+                      'owner',
+                      'admin_cabang',
+                      'kasir',
+                      'mekanik',
+                      'auditor',
+                    ]}
+                  >
+                    <ServicesPage />
+                  </RoleProtectedRoute>
+                }
+              />
+
+              <Route
+                path="spareparts"
+                element={
+                  <RoleProtectedRoute
+                    allowedRoles={[
+                      'owner',
+                      'admin_cabang',
+                      'kasir',
+                      'mekanik',
+                      'gudang',
+                      'auditor',
+                    ]}
+                  >
+                    <SparepartsPage />
+                  </RoleProtectedRoute>
+                }
+              />
+
+              <Route
+                path="suppliers"
+                element={
+                  <RoleProtectedRoute
+                    allowedRoles={[
+                      'owner',
+                      'admin_cabang',
+                      'gudang',
+                      'auditor',
+                    ]}
+                  >
+                    <SuppliersPage />
+                  </RoleProtectedRoute>
+                }
+              />
             </Route>
 
             {/* Core Workshop Operations */}

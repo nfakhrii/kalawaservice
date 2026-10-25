@@ -10,10 +10,52 @@ router.use(authenticateToken);
 router.get('/lookups', registryController.getLookups);
 
 // Pelanggan (Customers)
-router.get('/customers', registryController.getCustomers);
-router.post('/customers', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'kasir'), registryController.createCustomer);
-router.put('/customers/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'kasir'), registryController.updateCustomer);
-router.delete('/customers/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.deleteCustomer);
+const customerReadRoles = [
+  'owner',
+  'admin_cabang',
+  'kasir',
+];
+
+const customerWriteRoles = [
+  'owner',
+  'admin_cabang',
+  'kasir',
+];
+
+const customerDeleteRoles = [
+  'owner',
+  'admin_cabang',
+];
+
+router.get(
+  '/customers',
+  authorizeRoles(
+    'owner',
+    'admin_cabang',
+    'kasir',
+    'mekanik',
+    'auditor'
+  ),
+  registryController.getCustomers
+);
+
+router.post(
+  '/customers',
+  authorizeRoles(...customerWriteRoles),
+  registryController.createCustomer
+);
+
+router.put(
+  '/customers/:id',
+  authorizeRoles(...customerWriteRoles),
+  registryController.updateCustomer
+);
+
+router.delete(
+  '/customers/:id',
+  authorizeRoles(...customerDeleteRoles),
+  registryController.deleteCustomer
+);
 
 // Motor (Vehicles)
 router.get('/vehicles', registryController.getVehicles);
