@@ -954,19 +954,22 @@ class RegistryRepository {
         s.supplier_id AS kode_supplier,
         s.supplier_nama AS nama_supplier,
         s.supplier_nama,
-        'Account Manager'::VARCHAR AS kontak_person,
         s.supplier_telp AS telepon,
-        s.supplier_telp AS supplier_kontak,
-        s.supplier_telp,
+        s.supplier_telp AS supplier_telp,
         s.supplier_alamat AS alamat,
         s.supplier_alamat,
-        'Palangka Raya'::VARCHAR AS kota,
         COUNT(ssc.suku_cadang_kode) AS jumlah_sku
       FROM "SUPPLIER" s
-      LEFT JOIN "SUPPLIER_SUKU_CADANG" ssc ON ssc.supplier_id = s.supplier_id
-      GROUP BY s.supplier_id, s.supplier_nama, s.supplier_telp, s.supplier_alamat
+      LEFT JOIN "SUPPLIER_SUKU_CADANG" ssc
+        ON ssc.supplier_id = s.supplier_id
+      GROUP BY
+        s.supplier_id,
+        s.supplier_nama,
+        s.supplier_telp,
+        s.supplier_alamat
       ORDER BY s.supplier_id ASC;
     `;
+  
     const { rows } = await db.query(sql);
     return rows;
   }

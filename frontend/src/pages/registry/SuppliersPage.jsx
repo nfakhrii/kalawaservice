@@ -14,11 +14,8 @@ export default function SuppliersPage() {
   const [formData, setFormData] = useState({
     kode_supplier: '',
     nama_supplier: '',
-    kontak_person: '',
     telepon: '',
-    email: '',
     alamat: '',
-    kota: 'Palangka Raya',
   });
 
   const loadSuppliers = async () => {
@@ -39,40 +36,41 @@ export default function SuppliersPage() {
 
   const filtered = suppliers.filter((s) => {
     if (!search.trim()) return true;
+  
     const q = search.toLowerCase();
+  
     return (
       s.kode_supplier?.toLowerCase().includes(q) ||
       s.nama_supplier?.toLowerCase().includes(q) ||
-      s.kota?.toLowerCase().includes(q)
+      s.telepon?.toLowerCase().includes(q) ||
+      s.alamat?.toLowerCase().includes(q)
     );
   });
 
   const openCreateModal = () => {
     const nextNum = String(suppliers.length + 1).padStart(3, '0');
+  
     setEditingItem(null);
     setFormData({
       kode_supplier: `SP${nextNum}`,
       nama_supplier: '',
-      kontak_person: '',
       telepon: '',
-      email: '',
       alamat: '',
-      kota: 'Palangka Raya',
     });
+  
     setIsModalOpen(true);
   };
 
   const openEditModal = (s) => {
     setEditingItem(s);
+  
     setFormData({
       kode_supplier: s.kode_supplier,
       nama_supplier: s.nama_supplier,
-      kontak_person: s.kontak_person,
-      telepon: s.telepon,
-      email: s.email || '',
-      alamat: s.alamat,
-      kota: s.kota,
+      telepon: s.telepon || '',
+      alamat: s.alamat || '',
     });
+  
     setIsModalOpen(true);
   };
 
@@ -172,8 +170,8 @@ export default function SuppliersPage() {
                 <tr className="border-b border-[#d0d7de] bg-[#f6f8fa] text-[11px] font-semibold text-[#656d76] uppercase tracking-wider">
                   <th className="py-2.5 px-3">Kode Supplier</th>
                   <th className="py-2.5 px-3">Nama Perusahaan Supplier</th>
-                  <th className="py-2.5 px-3">Kontak Person &amp; Telepon</th>
-                  <th className="py-2.5 px-3">Kota &amp; Alamat</th>
+                  <th className="py-2.5 px-3">Telepon</th>
+                  <th className="py-2.5 px-3">Alamat</th>
                   <th className="py-2.5 px-3 text-right">Jumlah SKU</th>
                   <th className="py-2.5 px-3 text-right">Aksi</th>
                 </tr>
@@ -185,16 +183,17 @@ export default function SuppliersPage() {
                       {s.kode_supplier}
                     </td>
                     <td className="py-2.5 px-3">
-                      <div className="font-semibold text-[#1f2328]">{s.nama_supplier}</div>
-                      {s.email && <div className="text-[11px] text-[#656d76]">{s.email}</div>}
+                      <div className="font-semibold text-[#1f2328]">
+                        {s.nama_supplier}
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-xs">
+                      {s.telepon}
                     </td>
                     <td className="py-2.5 px-3">
-                      <div className="font-medium text-[#1f2328]">{s.kontak_person}</div>
-                      <div className="font-mono text-xs text-[#656d76]">{s.telepon}</div>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <div className="font-semibold text-[#1f2328]">{s.kota}</div>
-                      <div className="text-[11px] text-[#656d76]">{s.alamat}</div>
+                      <div className="text-[#1f2328]">
+                        {s.alamat}
+                      </div>
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-xs tabular-nums">
                       {s.jumlah_sku || 0} SKU
@@ -233,33 +232,31 @@ export default function SuppliersPage() {
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Kode Supplier</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Kode Supplier
+              </label>
               <input
                 type="text"
                 value={formData.kode_supplier}
-                onChange={(e) => setFormData({ ...formData, kode_supplier: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, kode_supplier: e.target.value })
+                }
                 className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
-                required
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Kota</label>
-              <input
-                type="text"
-                value={formData.kota}
-                onChange={(e) => setFormData({ ...formData, kota: e.target.value })}
-                className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
                 required
               />
             </div>
           </div>
 
           <div>
-            <label className="block font-semibold text-[#1f2328] mb-1">Nama Perusahaan Supplier</label>
+            <label className="block font-semibold text-[#1f2328] mb-1">
+              Nama Perusahaan Supplier
+            </label>
             <input
               type="text"
               value={formData.nama_supplier}
-              onChange={(e) => setFormData({ ...formData, nama_supplier: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, nama_supplier: e.target.value })
+              }
               className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
               required
             />
@@ -267,43 +264,30 @@ export default function SuppliersPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Kontak Person</label>
-              <input
-                type="text"
-                value={formData.kontak_person}
-                onChange={(e) => setFormData({ ...formData, kontak_person: e.target.value })}
-                className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
-                required
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Telepon</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Telepon
+              </label>
               <input
                 type="text"
                 value={formData.telepon}
-                onChange={(e) => setFormData({ ...formData, telepon: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, telepon: e.target.value })
+                }
                 className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
                 required
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Email</label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Alamat</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Alamat
+              </label>
               <input
                 type="text"
                 value={formData.alamat}
-                onChange={(e) => setFormData({ ...formData, alamat: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, alamat: e.target.value })
+                }
                 className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
                 required
               />
