@@ -275,6 +275,14 @@ class RegistryRepository {
         m.motor_no_mesin,
         m.motor_kilometer AS kilometer_terakhir,
         m.motor_kilometer,
+    
+        (
+          SELECT COUNT(*)
+          FROM "WORK_ORDER" wo
+          WHERE UPPER(TRIM(wo.motor_nopol))
+              = UPPER(TRIM(m.motor_nopol))
+        ) AS total_servis,
+
         CASE WHEN p.pelanggan_tipe = 'Korporat' THEN 'ARMADA_KORPORAT' ELSE 'REGULER' END AS jenis_armada,
         p.pelanggan_id AS kode_pelanggan,
         p.pelanggan_nama AS nama_pelanggan,
