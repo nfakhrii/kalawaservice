@@ -75,11 +75,41 @@ router.post('/spareparts', authorizeRoles('owner', 'role_owner', 'admin_cabang',
 router.put('/spareparts/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'gudang'), registryController.updateSparepart);
 router.delete('/spareparts/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.deleteSparepart);
 
-// Supplier
-router.get('/suppliers', registryController.getSuppliers);
-router.post('/suppliers', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'gudang'), registryController.createSupplier);
-router.put('/suppliers/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'gudang'), registryController.updateSupplier);
-router.delete('/suppliers/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'gudang'), registryController.deleteSupplier);
+
+ // Supplier
+ const supplierWriteRoles = ['owner', 'role_owner', 'gudang'];
+
+ router.get(
+   '/suppliers',
+   authorizeRoles(
+     'owner',
+     'role_owner',
+     'admin_cabang',
+     'gudang',
+     'kasir',
+     'mekanik',
+     'auditor'
+   ),
+   registryController.getSuppliers
+ );
+ 
+ router.post(
+   '/suppliers',
+   authorizeRoles(...supplierWriteRoles),
+   registryController.createSupplier
+ );
+ 
+ router.put(
+   '/suppliers/:id',
+   authorizeRoles(...supplierWriteRoles),
+   registryController.updateSupplier
+ );
+ 
+ router.delete(
+   '/suppliers/:id',
+   authorizeRoles(...supplierWriteRoles),
+   registryController.deleteSupplier
+ ); 
 
 module.exports = router;
 

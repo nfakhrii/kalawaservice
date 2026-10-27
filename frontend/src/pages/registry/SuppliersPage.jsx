@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { ModalDialog, AlertBanner, EmptyState } from '../../components/ui/GitHubComponents';
@@ -8,6 +9,12 @@ export default function SuppliersPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState(null);
+
+  const { user } = useAuth();
+
+  const currentRole = String(user?.role || '').toLowerCase();
+
+  const canManageSuppliers = ['owner', 'role_owner'].includes(currentRole);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -48,6 +55,7 @@ export default function SuppliersPage() {
   });
 
   const openCreateModal = () => {
+    if (!canManageSuppliers) return;
     const nextNum = String(suppliers.length + 1).padStart(3, '0');
   
     setEditingItem(null);
@@ -62,6 +70,7 @@ export default function SuppliersPage() {
   };
 
   const openEditModal = (s) => {
+    if (!canManageSuppliers) return;
     setEditingItem(s);
   
     setFormData({
@@ -75,6 +84,7 @@ export default function SuppliersPage() {
   };
 
   const handleSubmit = async (e) => {
+    if (!canManageSuppliers) return;
     e.preventDefault();
     setAlert(null);
     try {
@@ -150,14 +160,16 @@ export default function SuppliersPage() {
                 className="w-full pl-8 pr-3 py-1 text-xs bg-white border border-[#d0d7de] rounded-md focus:outline-none focus:border-[#0969da]"
               />
             </div>
-            <button
-              type="button"
-              onClick={openCreateModal}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Supplier</span>
-            </button>
+            {canManageSuppliers && (
+              <button
+                type="button"
+                onClick={openCreateModal}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Supplier</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -199,22 +211,27 @@ export default function SuppliersPage() {
                       {s.jumlah_sku || 0} SKU
                     </td>
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(s)}
-                          className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-[#f6f8fa] text-[#656d76] hover:text-[#1f2328] cursor-pointer"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(s)}
-                          className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-red-50 text-[#656d76] hover:text-red-600 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {canManageSuppliers && (
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(s)}
+                            className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-[#f6f8fa] text-[#656d76] hover:text-[#1f2328] cursor-pointer"
+                            title="Edit supplier"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(s)}
+                            className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-red-50 text-[#656d76] hover:text-red-600 cursor-pointer"
+                            title="Hapus supplier"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
