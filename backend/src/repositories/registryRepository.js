@@ -702,10 +702,7 @@ class RegistryRepository {
         sc.suku_cadang_kode AS kode_sku,
         sc.suku_cadang_nama AS nama_part,
         sc.suku_cadang_nama,
-        'SUKU CADANG'::VARCHAR AS kategori,
-        'SUKU CADANG'::VARCHAR AS suku_cadang_kategori,
         'PCS'::VARCHAR AS satuan,
-        ROUND(sc.suku_cadang_harga_satuan * 0.75, 0) AS harga_beli,
         sc.suku_cadang_harga_satuan AS harga_jual,
         sc.suku_cadang_harga_satuan,
         COALESCE(st.cabang_kode, $1) AS cabang_kode,
@@ -713,7 +710,6 @@ class RegistryRepository {
         COALESCE(st.stok_qty, 0) AS stok_qty,
         COALESCE(st.stok_qty, 0) AS stok_jumlah,
         COALESCE(st.stok_minimum, 5) AS stok_minimum,
-        ('GUDANG-' || COALESCE(st.cabang_kode, $1)) AS lokasi_rak,
         ssc.supplier_id,
         sup.supplier_id AS kode_supplier,
         sup.supplier_nama AS nama_supplier,
@@ -792,11 +788,12 @@ class RegistryRepository {
         await client.query(
           `
             INSERT INTO "SUPPLIER_SUKU_CADANG" (
-              supplier_id, suku_cadang_kode, harga_beli, lead_time_hari
-            ) VALUES ($1, $2, $3, 3)
+              supplier_id,
+              suku_cadang_kode
+            ) VALUES ($1, $2)
             ON CONFLICT (supplier_id, suku_cadang_kode) DO NOTHING;
           `,
-          [supplierId, kode, Math.round(hargaSatuan * 0.75)]
+          [supplierId, kode]
         );
       }
 
@@ -806,7 +803,6 @@ class RegistryRepository {
         kode_sku: kode,
         suku_cadang_nama: nama,
         nama_part: nama,
-        kategori: 'SUKU CADANG',
         satuan: 'PCS',
         harga_jual: hargaSatuan,
         suku_cadang_harga_satuan: hargaSatuan,
@@ -876,7 +872,6 @@ class RegistryRepository {
         kode_sku: rows[0].suku_cadang_kode,
         suku_cadang_nama: rows[0].suku_cadang_nama,
         nama_part: rows[0].suku_cadang_nama,
-        kategori: 'SUKU CADANG',
         satuan: 'PCS',
         harga_jual: rows[0].suku_cadang_harga_satuan,
         suku_cadang_harga_satuan: rows[0].suku_cadang_harga_satuan,
@@ -888,14 +883,64 @@ class RegistryRepository {
     });
   }
 
+  
   async deleteSparepart(id) {
-    const sql = `
-      DELETE FROM "SUKU_CADANG"
-      WHERE UPPER(suku_cadang_kode) = $1
-      RETURNING suku_cadang_kode AS id, suku_cadang_kode AS kode_sku, suku_cadang_nama AS nama_part;
-    `;
-    const { rows } = await db.query(sql, [String(id).trim().toUpperCase()]);
-    return rows[0] || null;
+    const kode = String(id).trim().toUpperCase();
+
+    return await db.withTransaction(async (client) => {
+      // 1. Pastikan sparepart ditemukan dan kunci barisnya.
+      const sparepartResult = await client.query(
+        `
+          SELECT suku_cadang_kode, suku_cadang_nama
+          FROM "SUKU_CADANG"
+          WHERE UPPER(suku_cadang_kode) = $1
+          FOR UPDATE;
+        `,
+        [kode]
+      );
+
+      if (sparepartResult.rowCount === 0) {
+        return null;
+      }
+
+      const sparepart = sparepartResult.rows[0];
+      const kodeAsli = sparepart.suku_cadang_kode;
+
+      // 2. Hapus relasi supplier untuk SKU ini.
+      await client.query(
+        `
+          DELETE FROM "SUPPLIER_SUKU_CADANG"
+          WHERE suku_cadang_kode = $1;
+        `,
+        [kodeAsli]
+      );
+
+      // 3. Hapus stok cabang untuk SKU ini.
+      // Jika masih direferensikan tabel transaksi lain, query berikutnya
+      // akan gagal dan seluruh transaksi di-rollback.
+      await client.query(
+        `
+          DELETE FROM "STOK_CABANG"
+          WHERE suku_cadang_kode = $1;
+        `,
+        [kodeAsli]
+      );
+
+      // 4. Hapus data master sparepart.
+      const deleteResult = await client.query(
+        `
+          DELETE FROM "SUKU_CADANG"
+          WHERE suku_cadang_kode = $1
+          RETURNING
+            suku_cadang_kode AS id,
+            suku_cadang_kode AS kode_sku,
+            suku_cadang_nama AS nama_part;
+        `,
+        [kodeAsli]
+      );
+
+      return deleteResult.rows[0] || null;
+    });
   }
 
   // ==========================================================================

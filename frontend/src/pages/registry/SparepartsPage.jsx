@@ -23,13 +23,10 @@ export default function SparepartsPage() {
     supplier_id: '',
     kode_sku: '',
     nama_part: '',
-    kategori: 'Pelumas',
-    satuan: 'PCS',
-    harga_beli: 45000,
     harga_jual: 60000,
     stok_saat_ini: 15,
     stok_minimum: 5,
-    lokasi_rak: 'RAK-A1',
+    satuan: 'PCS',
   });
 
   const loadData = async () => {
@@ -69,36 +66,34 @@ export default function SparepartsPage() {
 
   const openCreateModal = () => {
     const nextNum = String(spareparts.length + 1).padStart(3, '0');
+  
     setEditingItem(null);
     setFormData({
       supplier_id: suppliers[0]?.id || '',
       kode_sku: `SC${nextNum}`,
       nama_part: '',
-      kategori: 'Pelumas',
-      satuan: 'PCS',
-      harga_beli: 45000,
       harga_jual: 62000,
       stok_saat_ini: 12,
       stok_minimum: 5,
-      lokasi_rak: 'RAK-A4',
+      satuan: 'PCS',
     });
+  
     setIsModalOpen(true);
   };
 
   const openEditModal = (sp) => {
     setEditingItem(sp);
+  
     setFormData({
-      supplier_id: sp.supplier_id,
+      supplier_id: sp.supplier_id || '',
       kode_sku: sp.kode_sku,
       nama_part: sp.nama_part,
-      kategori: sp.kategori,
-      satuan: sp.satuan,
-      harga_beli: sp.harga_beli,
       harga_jual: sp.harga_jual,
       stok_saat_ini: sp.stok_saat_ini,
       stok_minimum: sp.stok_minimum,
-      lokasi_rak: sp.lokasi_rak || 'RAK-A1',
+      satuan: sp.satuan || 'PCS',
     });
+  
     setIsModalOpen(true);
   };
 
@@ -230,7 +225,6 @@ export default function SparepartsPage() {
                   <th className="py-2.5 px-3">Status Stok</th>
                   <th className="py-2.5 px-3 text-right">Stok Saat Ini</th>
                   <th className="py-2.5 px-3 text-right">Batas Min</th>
-                  <th className="py-2.5 px-3 text-right">Harga Beli</th>
                   <th className="py-2.5 px-3 text-right">Harga Jual</th>
                   <th className="py-2.5 px-3 text-right">Aksi</th>
                 </tr>
@@ -240,11 +234,9 @@ export default function SparepartsPage() {
                   <tr key={sp.id} className="hover:bg-[#f6f8fa]/70 transition-colors">
                     <td className="py-2.5 px-3 font-mono text-xs font-semibold text-[#0969da] whitespace-nowrap">
                       {sp.kode_sku}
-                      <div className="text-[10px] text-[#656d76]">{sp.lokasi_rak}</div>
                     </td>
                     <td className="py-2.5 px-3">
                       <div className="font-semibold text-[#1f2328]">{sp.nama_part}</div>
-                      <div className="text-[11px] text-[#656d76]">{sp.kategori}</div>
                     </td>
                     <td className="py-2.5 px-3">
                       <div className="font-medium text-[#1f2328]">{sp.nama_supplier}</div>
@@ -261,9 +253,6 @@ export default function SparepartsPage() {
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-xs text-[#656d76] tabular-nums">
                       {sp.stok_minimum} {sp.satuan}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono text-xs text-[#656d76] tabular-nums">
-                      {formatRupiah(sp.harga_beli)}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-xs font-semibold text-[#1f2328] tabular-nums">
                       {formatRupiah(sp.harga_jual)}
@@ -317,34 +306,19 @@ export default function SparepartsPage() {
             </select>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">     
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Kode SKU</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Kode SKU
+              </label>
               <input
                 type="text"
                 value={formData.kode_sku}
-                onChange={(e) => setFormData({ ...formData, kode_sku: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, kode_sku: e.target.value })
+                }
                 className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
                 required
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Kategori</label>
-              <input
-                type="text"
-                value={formData.kategori}
-                onChange={(e) => setFormData({ ...formData, kategori: e.target.value })}
-                className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
-                required
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Lokasi Rak</label>
-              <input
-                type="text"
-                value={formData.lokasi_rak}
-                onChange={(e) => setFormData({ ...formData, lokasi_rak: e.target.value })}
-                className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
               />
             </div>
           </div>
@@ -360,25 +334,18 @@ export default function SparepartsPage() {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"> 
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Harga Beli (Rp)</label>
-              <input
-                type="number"
-                min="0"
-                value={formData.harga_beli}
-                onChange={(e) => setFormData({ ...formData, harga_beli: e.target.value })}
-                className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
-                required
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Harga Jual (Rp)</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Harga Jual (Rp)
+              </label>
               <input
                 type="number"
                 min="0"
                 value={formData.harga_jual}
-                onChange={(e) => setFormData({ ...formData, harga_jual: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, harga_jual: e.target.value })
+                }
                 className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
                 required
               />
