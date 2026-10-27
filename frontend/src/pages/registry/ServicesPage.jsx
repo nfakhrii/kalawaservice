@@ -15,10 +15,7 @@ export default function ServicesPage() {
   const [formData, setFormData] = useState({
     kode_jasa: '',
     nama_jasa: '',
-    kategori: 'Servis Berkala',
     harga_jasa: 65000,
-    estimasi_menit: 30,
-    deskripsi: '',
   });
 
   const loadServices = async () => {
@@ -42,8 +39,7 @@ export default function ServicesPage() {
     const q = search.toLowerCase();
     return (
       s.kode_jasa?.toLowerCase().includes(q) ||
-      s.nama_jasa?.toLowerCase().includes(q) ||
-      s.kategori?.toLowerCase().includes(q)
+      s.nama_jasa?.toLowerCase().includes(q)
     );
   });
 
@@ -53,10 +49,7 @@ export default function ServicesPage() {
     setFormData({
       kode_jasa: `JS${nextNum}`,
       nama_jasa: '',
-      kategori: 'Servis Berkala',
       harga_jasa: 65000,
-      estimasi_menit: 30,
-      deskripsi: '',
     });
     setIsModalOpen(true);
   };
@@ -66,10 +59,7 @@ export default function ServicesPage() {
     setFormData({
       kode_jasa: s.kode_jasa,
       nama_jasa: s.nama_jasa,
-      kategori: s.kategori,
       harga_jasa: s.harga_jasa,
-      estimasi_menit: s.estimasi_menit || 30,
-      deskripsi: s.deskripsi || '',
     });
     setIsModalOpen(true);
   };
@@ -170,8 +160,6 @@ export default function ServicesPage() {
                 <tr className="border-b border-[#d0d7de] bg-[#f6f8fa] text-[11px] font-semibold text-[#656d76] uppercase tracking-wider">
                   <th className="py-2.5 px-3">Kode Jasa</th>
                   <th className="py-2.5 px-3">Nama Layanan &amp; Deskripsi</th>
-                  <th className="py-2.5 px-3">Kategori</th>
-                  <th className="py-2.5 px-3 text-right">Estimasi</th>
                   <th className="py-2.5 px-3 text-right">Digunakan</th>
                   <th className="py-2.5 px-3 text-right">Tarif Standar</th>
                   <th className="py-2.5 px-3 text-right">Aksi</th>
@@ -188,14 +176,6 @@ export default function ServicesPage() {
                       {s.deskripsi && (
                         <div className="text-[11px] text-[#656d76] mt-0.5 max-w-lg">{s.deskripsi}</div>
                       )}
-                    </td>
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <span className="px-2 py-0.5 rounded bg-slate-100 border border-[#d0d7de] text-[11px] font-medium">
-                        {s.kategori}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono text-xs tabular-nums">
-                      {s.estimasi_menit} mnt
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-xs tabular-nums">
                       {s.frekuensi_penggunaan || 0} WO
@@ -237,57 +217,31 @@ export default function ServicesPage() {
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Kode Jasa (Monospace)</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Kode Jasa
+              </label>
               <input
                 type="text"
                 value={formData.kode_jasa}
-                onChange={(e) => setFormData({ ...formData, kode_jasa: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, kode_jasa: e.target.value })
+                }
                 className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
                 required
               />
             </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Kategori</label>
-              <input
-                type="text"
-                value={formData.kategori}
-                onChange={(e) => setFormData({ ...formData, kategori: e.target.value })}
-                className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
-                required
-              />
-            </div>
-          </div>
 
-          <div>
-            <label className="block font-semibold text-[#1f2328] mb-1">Nama Layanan Jasa</label>
-            <input
-              type="text"
-              value={formData.nama_jasa}
-              onChange={(e) => setFormData({ ...formData, nama_jasa: e.target.value })}
-              className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Tarif Jasa (Rp)</label>
+              <label className="block font-semibold text-[#1f2328] mb-1">
+                Tarif Jasa (Rp)
+              </label>
               <input
                 type="number"
                 min="0"
                 value={formData.harga_jasa}
-                onChange={(e) => setFormData({ ...formData, harga_jasa: e.target.value })}
-                className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
-                required
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-[#1f2328] mb-1">Estimasi Pengerjaan (Menit)</label>
-              <input
-                type="number"
-                min="5"
-                value={formData.estimasi_menit}
-                onChange={(e) => setFormData({ ...formData, estimasi_menit: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, harga_jasa: e.target.value })
+                }
                 className="w-full px-2.5 py-1.5 font-mono border border-[#d0d7de] rounded-md"
                 required
               />
@@ -295,29 +249,18 @@ export default function ServicesPage() {
           </div>
 
           <div>
-            <label className="block font-semibold text-[#1f2328] mb-1">Deskripsi Pekerjaan</label>
-            <textarea
-              rows={2}
-              value={formData.deskripsi}
-              onChange={(e) => setFormData({ ...formData, deskripsi: e.target.value })}
+            <label className="block font-semibold text-[#1f2328] mb-1">
+              Nama Layanan Jasa
+            </label>
+            <input
+              type="text"
+              value={formData.nama_jasa}
+              onChange={(e) =>
+                setFormData({ ...formData, nama_jasa: e.target.value })
+              }
               className="w-full px-2.5 py-1.5 border border-[#d0d7de] rounded-md"
+              required
             />
-          </div>
-
-          <div className="pt-3 border-t border-[#d0d7de] flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328]"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer"
-            >
-              Simpan Jasa
-            </button>
           </div>
         </form>
       </ModalDialog>

@@ -583,23 +583,24 @@ class RegistryRepository {
   async getAllServices() {
     const sql = `
       SELECT
-        jasa_kode AS id,
-        jasa_kode,
-        jasa_kode AS kode_jasa,
-        jasa_uraian AS nama_jasa,
-        jasa_uraian AS jasa_nama,
-        jasa_uraian,
-        'SERVIS BENGKEL'::VARCHAR AS kategori_jasa,
-        'SERVIS BENGKEL'::VARCHAR AS jasa_kategori,
-        jasa_biaya AS harga_jasa,
-        jasa_biaya AS jasa_harga,
-        jasa_biaya,
-        45 AS estimasi_menit,
-        30 AS garansi_hari,
-        TRUE AS is_active
-      FROM "JASA_SERVIS"
-      ORDER BY jasa_kode ASC;
+        js.jasa_kode AS id,
+        js.jasa_kode,
+        js.jasa_kode AS kode_jasa,
+        js.jasa_uraian AS nama_jasa,
+        js.jasa_uraian AS jasa_nama,
+        js.jasa_uraian,
+        js.jasa_biaya AS harga_jasa,
+        js.jasa_biaya AS jasa_harga,
+        js.jasa_biaya,
+        (
+          SELECT COUNT(DISTINCT wj.work_no)
+          FROM "WO_JASA" wj
+          WHERE wj.jasa_kode = js.jasa_kode
+        ) AS frekuensi_penggunaan
+      FROM "JASA_SERVIS" js
+      ORDER BY js.jasa_kode ASC;
     `;
+  
     const { rows } = await db.query(sql);
     return rows;
   }
@@ -623,7 +624,9 @@ class RegistryRepository {
 
     const sql = `
       INSERT INTO "JASA_SERVIS" (
-        jasa_kode, jasa_uraian, jasa_biaya
+        jasa_kode,
+        jasa_uraian,
+        jasa_biaya
       ) VALUES ($1, $2, $3)
       RETURNING
         jasa_kode AS id,
@@ -632,13 +635,10 @@ class RegistryRepository {
         jasa_uraian AS nama_jasa,
         jasa_uraian AS jasa_nama,
         jasa_uraian,
-        'SERVIS BENGKEL'::VARCHAR AS kategori_jasa,
         jasa_biaya AS harga_jasa,
         jasa_biaya AS jasa_harga,
         jasa_biaya,
-        45 AS estimasi_menit,
-        30 AS garansi_hari,
-        TRUE AS is_active;
+        0::BIGINT AS frekuensi_penggunaan;
     `;
     const { rows } = await db.query(sql, [kode, uraian, biaya]);
     return rows[0];
@@ -672,11 +672,9 @@ class RegistryRepository {
         jasa_uraian AS nama_jasa,
         jasa_uraian AS jasa_nama,
         jasa_uraian,
-        'SERVIS BENGKEL'::VARCHAR AS kategori_jasa,
         jasa_biaya AS harga_jasa,
         jasa_biaya AS jasa_harga,
-        jasa_biaya,
-        45 AS estimasi_menit;
+        jasa_biaya;
     `;
     const { rows } = await db.query(sql, [uraian, biaya, kode]);
     return rows[0] || null;
