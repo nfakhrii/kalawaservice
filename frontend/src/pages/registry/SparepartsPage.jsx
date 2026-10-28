@@ -5,8 +5,8 @@ import { formatRupiah } from '../../utils/formatters';
 import {
   StockStatusBadge,
   ModalDialog,
-  AlertBanner,
   EmptyState,
+  FeedbackModal,
 } from '../../components/ui/GitHubComponents';
 
 export default function SparepartsPage() {
@@ -15,10 +15,38 @@ export default function SparepartsPage() {
   const [filterStock, setFilterStock] = useState('ALL'); // ALL, KRITIS
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [alert, setAlert] = useState(null);
+  const [feedback, setFeedback] = useState({
+    isOpen: false,
+    type: 'error',
+    title: '',
+    message: '',
+  });
+  
+  const showFeedback = (type, title, message) => {
+    setFeedback({
+      isOpen: true,
+      type,
+      title,
+      message,
+    });
+  };
+  
+  const closeFeedback = () => {
+    setFeedback((prev) => ({
+      ...prev,
+      isOpen: false,
+    }));
+  };
+
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    item: null,
+    isDeleting: false,
+  });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     supplier_id: '',
     kode_sku: '',
@@ -36,7 +64,11 @@ export default function SparepartsPage() {
       setSpareparts(spRes.data || []);
       setSuppliers(supRes.data || []);
     } catch (err) {
-      setAlert({ type: 'error', title: 'Gagal memuat suku cadang', message: err.message });
+      showFeedback(
+        'error',
+        'Gagal Memuat Suku Cadang',
+        err.message || 'Terjadi kesalahan pada server.'
+      );
     } finally {
       setLoading(false);
     }
@@ -99,64 +131,99 @@ export default function SparepartsPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setAlert(null);
+
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+
+    const isEditing = Boolean(editingItem);
+    const kodeSku = formData.kode_sku;
+    const namaPart = formData.nama_part;
+
     try {
-      if (editingItem) {
+      if (isEditing) {
         await api.updateSparepart(editingItem.id, formData);
-        setAlert({
-          type: 'success',
-          title: 'Suku Cadang Diperbarui',
-          message: `SKU ${formData.kode_sku} berhasil diperbarui.`,
-        });
       } else {
         await api.createSparepart(formData);
-        setAlert({
-          type: 'success',
-          title: 'Suku Cadang Baru Ditambahkan',
-          message: `SKU ${formData.kode_sku} (${formData.nama_part}) disimpan.`,
-        });
       }
+
       setIsModalOpen(false);
-      loadData();
+
+      showFeedback(
+        'success',
+        isEditing
+          ? 'Suku Cadang Berhasil Diperbarui'
+          : 'Suku Cadang Berhasil Ditambahkan',
+        isEditing
+          ? `SKU ${kodeSku} berhasil diperbarui.`
+          : `SKU ${kodeSku} (${namaPart}) berhasil disimpan.`
+      );
+
+      await loadData();
     } catch (err) {
-      setAlert({
-        type: 'error',
-        title: `Gagal Menyimpan SKU (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
-      });
+      showFeedback(
+        'error',
+        isEditing
+          ? 'Gagal Memperbarui Suku Cadang'
+          : 'Gagal Menambahkan Suku Cadang',
+        err.message || 'Terjadi kesalahan pada server.'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async (sp) => {
-    if (!window.confirm(`Hapus suku cadang ${sp.kode_sku} - ${sp.nama_part}?`)) return;
-    setAlert(null);
+  const handleDelete = (item) => {
+    setDeleteModal({
+      isOpen: true,
+      item,
+      isDeleting: false,
+    });
+  };
+
+  const confirmDelete = async () => {
+    const item = deleteModal.item;
+
+    if (!item || deleteModal.isDeleting) return;
+
+    setDeleteModal((prev) => ({
+      ...prev,
+      isDeleting: true,
+    }));
+
     try {
-      await api.deleteSparepart(sp.id);
-      setAlert({ type: 'success', title: 'Suku Cadang Dihapus', message: `${sp.kode_sku} dihapus.` });
-      loadData();
-    } catch (err) {
-      setAlert({
-        type: 'error',
-        title: `Penghapusan Ditolak (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
+      await api.deleteSparepart(item.id);
+
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
       });
+
+      showFeedback(
+        'success',
+        'Suku Cadang Berhasil Dihapus',
+        `SKU ${item.kode_sku} (${item.nama_part}) berhasil dihapus.`
+      );
+
+      await loadData();
+    } catch (err) {
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
+      });
+
+      showFeedback(
+        'error',
+        'Gagal Menghapus Suku Cadang',
+        err.message || 'Terjadi kesalahan pada server.'
+      );
     }
   };
 
   return (
     <div className="space-y-4">
-      {alert && (
-        <AlertBanner
-          type={alert.type}
-          title={alert.title}
-          code={alert.code}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
-
       <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
         <div className="p-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-1 bg-white border border-[#d0d7de] rounded-md p-0.5">
@@ -391,24 +458,93 @@ export default function SparepartsPage() {
               </select>
             </div>
           </div>
-
+ 
           <div className="pt-3 border-t border-[#d0d7de] flex items-center justify-end gap-2">
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => setIsModalOpen(false)}
-              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328]"
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328] disabled:opacity-60"
             >
               Batal
             </button>
+
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Simpan Suku Cadang
+              {isSubmitting
+                ? 'Menyimpan...'
+                : editingItem
+                  ? 'Simpan Perubahan'
+                  : 'Simpan Suku Cadang'}
             </button>
           </div>
         </form>
       </ModalDialog>
+      
+      {/* Modal Konfirmasi Hapus Suku Cadang */}
+      <ModalDialog
+        isOpen={deleteModal.isOpen}
+        onClose={() => {
+          if (deleteModal.isDeleting) return;
+
+          setDeleteModal({
+            isOpen: false,
+            item: null,
+            isDeleting: false,
+          });
+        }}
+        title="Konfirmasi Hapus Suku Cadang"
+        subtitle="Pastikan suku cadang yang dipilih sudah benar."
+      >
+        <div className="space-y-4 text-sm">
+          <p className="text-[#1f2328]">
+            Apakah kamu yakin ingin menghapus suku cadang{' '}
+            <strong>
+              {deleteModal.item?.kode_sku}
+              {' — '}
+              {deleteModal.item?.nama_part}
+            </strong>
+            ?
+          </p>
+
+          <div className="flex items-center justify-end gap-2 border-t border-[#d0d7de] pt-3">
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={() =>
+                setDeleteModal({
+                  isOpen: false,
+                  item: null,
+                  isDeleting: false,
+                })
+              }
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-white text-[#1f2328] font-medium hover:bg-[#f6f8fa] disabled:opacity-60"
+            >
+              Batal
+            </button>
+
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={confirmDelete}
+              className="px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {deleteModal.isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
+
+      <FeedbackModal
+        isOpen={feedback.isOpen}
+        type={feedback.type}
+        title={feedback.title}
+        message={feedback.message}
+        onClose={closeFeedback}
+      />
     </div>
   );
 }

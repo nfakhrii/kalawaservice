@@ -2,13 +2,44 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
 import { api } from '../../services/api';
-import { ModalDialog, AlertBanner, EmptyState } from '../../components/ui/GitHubComponents';
+import {
+  ModalDialog,
+  EmptyState,
+  FeedbackModal,
+} from '../../components/ui/GitHubComponents';
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [alert, setAlert] = useState(null);
+  const [feedback, setFeedback] = useState({
+      isOpen: false,
+      type: 'error',
+      title: '',
+      message: '',
+    });
+    
+    const showFeedback = (type, title, message) => {
+      setFeedback({
+        isOpen: true,
+        type,
+        title,
+        message,
+      });
+    };
+    
+    const closeFeedback = () => {
+      setFeedback((prev) => ({
+        ...prev,
+        isOpen: false,
+      }));
+    };
+
+    const [deleteModal, setDeleteModal] = useState({
+      isOpen: false,
+      item: null,
+      isDeleting: false,
+    });
 
   const { user } = useAuth();
 
@@ -18,6 +49,7 @@ export default function SuppliersPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     kode_supplier: '',
     nama_supplier: '',
@@ -31,7 +63,11 @@ export default function SuppliersPage() {
       const res = await api.getSuppliers();
       setSuppliers(res.data || []);
     } catch (err) {
-      setAlert({ type: 'error', title: 'Gagal memuat supplier', message: err.message });
+      showFeedback(
+        'error',
+        'Gagal Memuat Supplier',
+        err.message || 'Terjadi kesalahan pada server.'
+      );
     } finally {
       setLoading(false);
     }
@@ -83,67 +119,104 @@ export default function SuppliersPage() {
     setIsModalOpen(true);
   };
 
+  
   const handleSubmit = async (e) => {
-    if (!canManageSuppliers) return;
     e.preventDefault();
-    setAlert(null);
+
+    if (!canManageSuppliers || isSubmitting) return;
+
+    setIsSubmitting(true);
+
+    const isEditing = Boolean(editingItem);
+    const namaSupplier = formData.nama_supplier;
+    const kodeSupplier = formData.kode_supplier;
+
     try {
-      if (editingItem) {
+      if (isEditing) {
         await api.updateSupplier(editingItem.id, formData);
-        setAlert({
-          type: 'success',
-          title: 'Data Supplier Diperbarui',
-          message: `${formData.nama_supplier} telah diperbarui.`,
-        });
       } else {
         await api.createSupplier(formData);
-        setAlert({
-          type: 'success',
-          title: 'Supplier Baru Ditambahkan',
-          message: `${formData.nama_supplier} berhasil disimpan.`,
-        });
       }
+
       setIsModalOpen(false);
-      loadSuppliers();
+
+      showFeedback(
+        'success',
+        isEditing
+          ? 'Supplier Berhasil Diperbarui'
+          : 'Supplier Berhasil Ditambahkan',
+        isEditing
+          ? `${namaSupplier} berhasil diperbarui.`
+          : `${namaSupplier} (${kodeSupplier}) berhasil disimpan.`
+      );
+
+      await loadSuppliers();
     } catch (err) {
-      setAlert({
-        type: 'error',
-        title: `Gagal Menyimpan Supplier (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
-      });
+      showFeedback(
+        'error',
+        isEditing
+          ? 'Gagal Memperbarui Supplier'
+          : 'Gagal Menambahkan Supplier',
+        err.message || 'Terjadi kesalahan pada server.'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async (s) => {
-    if (!window.confirm(`Hapus supplier ${s.nama_supplier}?`)) return;
-    setAlert(null);
+  const handleDelete = (item) => {
+    if (!canManageSuppliers) return;
+
+    setDeleteModal({
+      isOpen: true,
+      item,
+      isDeleting: false,
+    });
+  };
+
+  const confirmDelete = async () => {
+    const item = deleteModal.item;
+
+    if (!canManageSuppliers || !item || deleteModal.isDeleting) return;
+
+    setDeleteModal((prev) => ({
+      ...prev,
+      isDeleting: true,
+    }));
+
     try {
-      await api.deleteSupplier(s.id);
-      setAlert({ type: 'success', title: 'Supplier Dihapus', message: `${s.nama_supplier} dihapus.` });
-      loadSuppliers();
-    } catch (err) {
-      setAlert({
-        type: 'error',
-        title: `Penghapusan Ditolak (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
+      await api.deleteSupplier(item.id);
+
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
       });
+
+      showFeedback(
+        'success',
+        'Supplier Berhasil Dihapus',
+        `${item.nama_supplier} berhasil dihapus.`
+      );
+
+      await loadSuppliers();
+    } catch (err) {
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
+      });
+
+      showFeedback(
+        'error',
+        'Gagal Menghapus Supplier',
+        err.message || 'Terjadi kesalahan pada server.'
+      );
     }
   };
 
   return (
     <div className="space-y-4">
-      {alert && (
-        <AlertBanner
-          type={alert.type}
-          title={alert.title}
-          code={alert.code}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
-
       <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
         <div className="p-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex flex-wrap items-center justify-between gap-3">
           <div className="text-xs font-semibold text-[#1f2328]">
@@ -314,20 +387,89 @@ export default function SuppliersPage() {
           <div className="pt-3 border-t border-[#d0d7de] flex items-center justify-end gap-2">
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => setIsModalOpen(false)}
-              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328]"
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328] disabled:opacity-60"
             >
               Batal
             </button>
+
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Simpan Supplier
+              {isSubmitting
+                ? 'Menyimpan...'
+                : editingItem
+                  ? 'Simpan Perubahan'
+                  : 'Simpan Supplier'}
             </button>
           </div>
         </form>
       </ModalDialog>
+      
+      {/* Modal Konfirmasi Hapus Supplier */}
+      <ModalDialog
+        isOpen={deleteModal.isOpen}
+        onClose={() => {
+          if (deleteModal.isDeleting) return;
+
+          setDeleteModal({
+            isOpen: false,
+            item: null,
+            isDeleting: false,
+          });
+        }}
+        title="Konfirmasi Hapus Supplier"
+        subtitle="Pastikan supplier yang dipilih sudah benar."
+      >
+        <div className="space-y-4 text-sm">
+          <p className="text-[#1f2328]">
+            Apakah kamu yakin ingin menghapus supplier{' '}
+            <strong>
+              {deleteModal.item?.kode_supplier}
+              {' — '}
+              {deleteModal.item?.nama_supplier}
+            </strong>
+            ?
+          </p>
+
+          <div className="flex items-center justify-end gap-2 border-t border-[#d0d7de] pt-3">
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={() =>
+                setDeleteModal({
+                  isOpen: false,
+                  item: null,
+                  isDeleting: false,
+                })
+              }
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-white text-[#1f2328] font-medium hover:bg-[#f6f8fa] disabled:opacity-60"
+            >
+              Batal
+            </button>
+
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={confirmDelete}
+              className="px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {deleteModal.isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
+
+      <FeedbackModal
+        isOpen={feedback.isOpen}
+        type={feedback.type}
+        title={feedback.title}
+        message={feedback.message}
+        onClose={closeFeedback}
+      />
     </div>
   );
 }

@@ -45,6 +45,13 @@ export default function CustomersPage() {
       isOpen: false,
     }));
   };
+
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    item: null,
+    isDeleting: false,
+  });
+
   const [formData, setFormData] = useState({
     kode_pelanggan: '',
     nama_pelanggan: '',
@@ -67,12 +74,11 @@ export default function CustomersPage() {
       const res = await api.getCustomers();
       setCustomers(res.data || []);
     } catch (err) {
-      // Jangan tampilkan popup berulang ketika polling berjalan.
       if (!silent) {
-        window.alert(
-          `Gagal memuat data pelanggan.\n\n${
-            err.message || 'Terjadi kesalahan pada server.'
-          }`
+        showFeedback(
+          'error',
+          'Gagal Memuat Data Pelanggan',
+          err.message || 'Terjadi kesalahan pada server.'
         );
       }
     } finally {
@@ -202,28 +208,47 @@ export default function CustomersPage() {
     }
   };
   
-  const handleDelete = async (item) => {
-    if (
-      !window.confirm(
-        `Hapus pelanggan ${item.nama_pelanggan} (${item.kode_pelanggan})?`
-      )
-    ) {
-      return;
-    }
+  const handleDelete = (item) => {
+    setDeleteModal({
+      isOpen: true,
+      item,
+      isDeleting: false,
+    });
+  };
 
-    setAlert(null);
-
+  const confirmDelete = async () => {
+    const item = deleteModal.item;
+  
+    if (!item || deleteModal.isDeleting) return;
+  
+    setDeleteModal((prev) => ({
+      ...prev,
+      isDeleting: true,
+    }));
+  
     try {
       await api.deleteCustomer(item.id);
-
-      await loadCustomers();
-
+  
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
+      });
+  
       showFeedback(
         'success',
         'Pelanggan Berhasil Dihapus',
         `Data ${item.nama_pelanggan} berhasil dihapus.`
       );
+  
+      await loadCustomers({ silent: true });
     } catch (err) {
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
+      });
+  
       showFeedback(
         'error',
         'Gagal Menghapus Pelanggan',
@@ -560,6 +585,58 @@ export default function CustomersPage() {
             </button>
           </div>
         </form>
+      </ModalDialog>
+      {/* Modal Konfirmasi Hapus Pelanggan */}
+      <ModalDialog
+        isOpen={deleteModal.isOpen}
+        onClose={() => {
+          if (deleteModal.isDeleting) return;
+
+          setDeleteModal({
+            isOpen: false,
+            item: null,
+            isDeleting: false,
+          });
+        }}
+        title="Konfirmasi Hapus Pelanggan"
+        subtitle="Tindakan ini tidak dapat dibatalkan."
+      >
+        <div className="space-y-4 text-sm">
+          <p className="text-[#1f2328]">
+            Apakah kamu yakin ingin menghapus pelanggan{' '}
+            <strong>
+              {deleteModal.item?.nama_pelanggan}
+              {' '}({deleteModal.item?.kode_pelanggan})
+            </strong>
+            ?
+          </p>
+
+          <div className="flex items-center justify-end gap-2 border-t border-[#d0d7de] pt-3">
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={() =>
+                setDeleteModal({
+                  isOpen: false,
+                  item: null,
+                  isDeleting: false,
+                })
+              }
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-white text-[#1f2328] font-medium hover:bg-[#f6f8fa] disabled:opacity-60"
+            >
+              Batal
+            </button>
+
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={confirmDelete}
+              className="px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {deleteModal.isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+            </button>
+          </div>
+        </div>
       </ModalDialog>
       <FeedbackModal
         isOpen={feedback.isOpen}

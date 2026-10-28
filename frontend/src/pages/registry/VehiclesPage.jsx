@@ -5,7 +5,6 @@ import { formatNumber } from '../../utils/formatters';
 import {
   CustomerTypeBadge,
   ModalDialog,
-  AlertBanner,
   EmptyState,
   FeedbackModal,
 } from '../../components/ui/GitHubComponents';
@@ -16,7 +15,6 @@ export default function VehiclesPage() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('ALL');
   const [loading, setLoading] = useState(true);
-  const [alert, setAlert] = useState(null);
 
   const [feedback, setFeedback] = useState({
     isOpen: false,
@@ -41,8 +39,15 @@ export default function VehiclesPage() {
     }));
   };
 
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    item: null,
+    isDeleting: false,
+  });
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     pelanggan_id: '',
     plat_nomor: '',
@@ -61,7 +66,11 @@ export default function VehiclesPage() {
       setVehicles(vRes.data || []);
       setCustomers(cRes.data || []);
     } catch (err) {
-      setAlert({ type: 'error', title: 'Gagal memuat data motor', message: err.message });
+      showFeedback(
+        'error',
+        'Gagal Memuat Data Motor',
+        err.message || 'Terjadi kesalahan pada server.'
+      );
     } finally {
       setLoading(false);
     }
@@ -116,57 +125,84 @@ export default function VehiclesPage() {
     });
     setIsModalOpen(true);
   };
-
+ 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setAlert(null);
+
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+
+    const isEditing = Boolean(editingItem);
+    const platNomor = formData.plat_nomor;
+
     try {
-      if (editingItem) {
+      if (isEditing) {
         await api.updateVehicle(editingItem.id, formData);
-        setAlert({
-          type: 'success',
-          title: 'Data Motor Diperbarui',
-          message: `Unit ${formData.plat_nomor} berhasil diperbarui.`,
-        });
       } else {
         await api.createVehicle(formData);
-        setAlert({
-          type: 'success',
-          title: 'Motor Baru Terdaftar',
-          message: `Unit ${formData.plat_nomor} berhasil didaftarkan.`,
-        });
       }
+
       setIsModalOpen(false);
-      loadData();
+
+      showFeedback(
+        'success',
+        isEditing ? 'Motor Berhasil Diperbarui' : 'Motor Berhasil Ditambahkan',
+        isEditing
+          ? `Data motor ${platNomor} berhasil diperbarui.`
+          : `Motor ${platNomor} berhasil didaftarkan.`
+      );
+
+      await loadData();
     } catch (err) {
-      setAlert({
-        type: 'error',
-        title: `Gagal Menyimpan Motor (${err.status || 400})`,
-        code: err.code,
-        message: err.message,
-      });
+      showFeedback(
+        'error',
+        isEditing ? 'Gagal Memperbarui Motor' : 'Gagal Menambahkan Motor',
+        err.message || 'Terjadi kesalahan pada server. Silakan coba kembali.'
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async (v) => {
-    if (!window.confirm(`Hapus data motor ${v.plat_nomor}?`)) {
-      return;
-    }
-  
+  const handleDelete = (item) => {
+    setDeleteModal({
+      isOpen: true,
+      item,
+      isDeleting: false,
+    });
+  };
+
+  const confirmDelete = async () => {
+    const item = deleteModal.item;
+
+    if (!item || deleteModal.isDeleting) return;
+
+    setDeleteModal((prev) => ({
+      ...prev,
+      isDeleting: true,
+    }));
+
     try {
-      await api.deleteVehicle(v.id);
-  
+      await api.deleteVehicle(item.id);
+
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
+      });
+
       showFeedback(
         'success',
         'Motor Berhasil Dihapus',
-        `Data motor ${v.plat_nomor} berhasil dihapus.`
+        `Data motor ${item.plat_nomor} berhasil dihapus.`
       );
-  
+
       await loadData();
     } catch (err) {
       let message =
         'Terjadi kesalahan pada server. Silakan coba kembali.';
-  
+
       if (
         err.code === 'FOREIGN_KEY_VIOLATION' ||
         err.code === '23503'
@@ -178,7 +214,13 @@ export default function VehiclesPage() {
       } else if (err.message) {
         message = err.message;
       }
-  
+
+      setDeleteModal({
+        isOpen: false,
+        item: null,
+        isDeleting: false,
+      });
+
       showFeedback(
         'error',
         'Gagal Menghapus Motor',
@@ -189,16 +231,6 @@ export default function VehiclesPage() {
 
   return (
     <div className="space-y-4">
-      {alert && (
-        <AlertBanner
-          type={alert.type}
-          title={alert.title}
-          code={alert.code}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
-
       <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
         <div className="p-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-1 bg-white border border-[#d0d7de] rounded-md p-0.5">
@@ -448,20 +480,82 @@ export default function VehiclesPage() {
           <div className="pt-3 border-t border-[#d0d7de] flex items-center justify-end gap-2">
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => setIsModalOpen(false)}
-              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328] font-medium"
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-[#f6f8fa] text-[#1f2328] font-medium disabled:opacity-60"
             >
               Batal
             </button>
+
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white font-semibold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Simpan Unit Motor
+              {isSubmitting
+                ? 'Menyimpan...'
+                : editingItem
+                  ? 'Simpan Perubahan'
+                  : 'Simpan Unit Motor'}
             </button>
           </div>
         </form>
       </ModalDialog>
+      
+      {/* Modal Konfirmasi Hapus Motor */}
+      <ModalDialog
+        isOpen={deleteModal.isOpen}
+        onClose={() => {
+          if (deleteModal.isDeleting) return;
+
+          setDeleteModal({
+            isOpen: false,
+            item: null,
+            isDeleting: false,
+          });
+        }}
+        title="Konfirmasi Hapus Motor"
+        subtitle="Pastikan unit motor yang dipilih sudah benar."
+      >
+        <div className="space-y-4 text-sm">
+          <p className="text-[#1f2328]">
+            Apakah kamu yakin ingin menghapus data motor{' '}
+            <strong>{deleteModal.item?.plat_nomor}</strong>?
+          </p>
+
+          <p className="text-xs text-[#656d76]">
+            Jika motor masih memiliki riwayat transaksi atau data terkait,
+            penghapusan mungkin akan ditolak oleh sistem.
+          </p>
+
+          <div className="flex items-center justify-end gap-2 border-t border-[#d0d7de] pt-3">
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={() =>
+                setDeleteModal({
+                  isOpen: false,
+                  item: null,
+                  isDeleting: false,
+                })
+              }
+              className="px-3 py-1.5 rounded-md border border-[#d0d7de] bg-white text-[#1f2328] font-medium hover:bg-[#f6f8fa] disabled:opacity-60"
+            >
+              Batal
+            </button>
+
+            <button
+              type="button"
+              disabled={deleteModal.isDeleting}
+              onClick={confirmDelete}
+              className="px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {deleteModal.isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
+
       <FeedbackModal
         isOpen={feedback.isOpen}
         type={feedback.type}
