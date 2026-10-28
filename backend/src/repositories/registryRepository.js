@@ -254,6 +254,13 @@ class RegistryRepository {
       ? '"VW_PELANGGAN_AMAN"'
       : '"PELANGGAN"';
 
+      const currentUser = db.getCurrentUserContext();
+      const role = currentUser?.role;
+
+      const workOrderTable = ['mekanik', 'auditor'].includes(role)
+        ? '"VW_WORK_ORDER_AMAN"'
+        : '"WORK_ORDER"';
+
     const sql = `
       SELECT
         m.motor_nopol AS id,
@@ -278,7 +285,7 @@ class RegistryRepository {
     
         (
           SELECT COUNT(*)
-          FROM "WORK_ORDER" wo
+          FROM ${workOrderTable} wo
           WHERE UPPER(TRIM(wo.motor_nopol))
               = UPPER(TRIM(m.motor_nopol))
         ) AS total_servis,
