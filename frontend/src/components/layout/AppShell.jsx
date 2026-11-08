@@ -17,7 +17,6 @@ import {
   Bug,
   LogOut,
   ChevronRight,
-  Plus,
 } from 'lucide-react';
 import { ROLE_METADATA } from '../../utils/formatters';
 
@@ -102,17 +101,8 @@ export default function AppShell() {
             })}
           </div>
 
-          {/* Right: New Work Order CTA & User Profile */}
+          {/* Right: User Profile */}
           <div className="flex items-center flex-wrap gap-2">
-            {/* GitHub Action Green Button: New Work Order */}
-            <Link
-              to="/app/operations/work-orders/new"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white shadow-2xs transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Work Order</span>
-            </Link>
-
             {/* User Badge & Switch/Logout Link */}
             <div className="flex items-center gap-2 bg-white border border-[#d0d7de] rounded-md px-2.5 py-1">
               <div className="text-right">
