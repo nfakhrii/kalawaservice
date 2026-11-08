@@ -58,12 +58,6 @@ export const api = {
     };
   },
 
-  quickSwitchRole: (role) =>
-    apiRequest('/auth/quick-switch', {
-      method: 'POST',
-      body: { role },
-    }),
-
   getDemoUsers: () => apiRequest('/auth/demo-users'),
 
   // Overview

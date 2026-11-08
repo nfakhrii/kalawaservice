@@ -16,14 +16,13 @@ import {
   BarChart3,
   Bug,
   LogOut,
-  ShieldCheck,
   ChevronRight,
   Plus,
 } from 'lucide-react';
 import { ROLE_METADATA } from '../../utils/formatters';
 
 export default function AppShell() {
-  const { user, quickSwitchRole, logout } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -56,15 +55,6 @@ export default function AppShell() {
   ];
 
   const currentRoleMeta = ROLE_METADATA[user?.role] || ROLE_METADATA.admin_cabang;
-
-  const quickRoles = [
-    { key: 'owner', label: 'user_owner' },
-    { key: 'admin_cabang', label: 'user_admin_cabang' },
-    { key: 'kasir', label: 'user_kasir' },
-    { key: 'mekanik', label: 'user_mekanik' },
-    { key: 'gudang', label: 'user_gudang' },
-    { key: 'auditor', label: 'user_auditor' },
-  ];
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f6f8fa] text-[#1f2328]">
@@ -112,34 +102,8 @@ export default function AppShell() {
             })}
           </div>
 
-          {/* Right: Quick-Switch Role Bar (6 Roles), New Work Order CTA & User Profile */}
+          {/* Right: New Work Order CTA & User Profile */}
           <div className="flex items-center flex-wrap gap-2">
-            {/* Quick-Switch Role Demo Pill Group (6 Kelompok 1 Accounts) */}
-            <div className="hidden xl:flex items-center bg-white border border-[#d0d7de] rounded-md p-0.5 text-xs">
-              <span className="px-2 py-1 text-[11px] font-medium text-[#656d76] flex items-center gap-1 border-r border-[#d0d7de]">
-                <ShieldCheck className="w-3.5 h-3.5 text-[#0969da]" />
-                Role:
-              </span>
-              {quickRoles.map((r) => {
-                const active = user?.role === r.key;
-                return (
-                  <button
-                    key={r.key}
-                    type="button"
-                    onClick={() => quickSwitchRole(r.key)}
-                    className={`px-2 py-1 rounded font-mono text-[11px] transition-colors cursor-pointer ${
-                      active
-                        ? 'bg-[#0969da] text-white font-semibold'
-                        : 'text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa]'
-                    }`}
-                    title={`Beralih ke akun ${r.label}`}
-                  >
-                    {r.label}
-                  </button>
-                );
-              })}
-            </div>
-
             {/* GitHub Action Green Button: New Work Order */}
             <Link
               to="/app/operations/work-orders/new"
@@ -224,7 +188,7 @@ export default function AppShell() {
           </div>
           <div className="flex items-center gap-3 font-mono text-[11px]">
             <Link to="/auth/login" className="text-[#0969da] hover:underline">
-              /auth/login (6 Role Switcher)
+              /auth/login
             </Link>
             <span>&middot;</span>
             <Link to="/app/system/diagnostics" className="text-[#0969da] hover:underline">

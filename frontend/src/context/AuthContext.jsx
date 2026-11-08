@@ -90,18 +90,6 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const quickSwitchRole = async (role) => {
-    setLoading(true);
-
-    try {
-      const res = await api.quickSwitchRole(role);
-      saveSession(res.data.token, res.data.user);
-      return res.data;
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const logout = () => {
     clearSession();
   };
@@ -115,7 +103,6 @@ export function AuthProvider({ children }) {
         checkingAuth,
         isAuthenticated: Boolean(token && user),
         login,
-        quickSwitchRole,
         logout,
       }}
     >
