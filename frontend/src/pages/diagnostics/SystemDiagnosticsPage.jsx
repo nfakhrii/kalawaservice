@@ -1,14 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   Bug,
-  Play,
-  RotateCcw,
-  CheckCircle2,
   Database,
   HardDriveDownload,
-  Terminal,
   ShieldCheck,
   RefreshCw,
+  RotateCcw,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatDateTime } from '../../utils/formatters';
@@ -17,8 +14,6 @@ import { AlertBanner } from '../../components/ui/GitHubComponents';
 export default function SystemDiagnosticsPage() {
   const [sysInfo, setSysInfo] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
-  const [results, setResults] = useState({});
-  const [runningScenario, setRunningScenario] = useState(null);
   const [resetting, setResetting] = useState(false);
   const [alert, setAlert] = useState(null);
 
@@ -38,221 +33,6 @@ export default function SystemDiagnosticsPage() {
   useEffect(() => {
     loadSystemStatus();
   }, []);
-
-  const scenarios = [
-    {
-      id: 1,
-      title: 'Skenario #1: Input Work Order Tanpa Motor',
-      expectedStatus: 400,
-      expectedBadge: '400 Bad Request',
-      endpoint: 'POST /api/operations/work-orders',
-      mechanism:
-        'Validasi NOT NULL & Foreign Key (motor_nopol REFERENCES "MOTOR"(motor_nopol)) di PostgreSQL + validasi input di Express Service.',
-      description:
-        'Mengirim request pembuatan Work Order baru pada tabel "WORK_ORDER" dengan atribut motor_id / motor_nopol = null. Sistem wajib menolak dengan HTTP 400 Bad Request tanpa crash.',
-    },
-    {
-      id: 2,
-      title: 'Skenario #2: Pembayaran Dobel (Double Payment)',
-      expectedStatus: 409,
-      expectedBadge: '409 Conflict',
-      endpoint: 'POST /api/operations/payments',
-      mechanism:
-        'Pengecekan pembayaran_status = \'Lunas\' & work_status = \'Sudah Dibayar\' pada tabel "WORK_ORDER" di dalam transaksi ACID (BEGIN ... FOR UPDATE ... ROLLBACK).',
-      description:
-        'Mengirim pembayaran kedua untuk Work Order #WO001 yang sudah berstatus Lunas / Sudah Dibayar. Sistem wajib menolak pembayaran ganda dengan HTTP 409 Conflict.',
-    },
-    {
-      id: 3,
-      title: 'Skenario #3: Stok Suku Cadang Tidak Cukup',
-      expectedStatus: 422,
-      expectedBadge: '422 Unprocessable Entity',
-      endpoint: 'POST /api/operations/work-orders/:woId/spareparts',
-      mechanism:
-        'PostgreSQL Trigger asli Kelompok 1 (AFTER INSERT ON "WO_SUKU_CADANG" -> trg_kurangi_stok) + CHECK constraint chk_stok_qty (stok_jumlah >= 0) pada tabel "STOK_CABANG".',
-      description:
-        'Mencoba menambahkan 50 PCS suku cadang stok kritis (misal SC008 — Busi Iridium NGK dengan sisa stok 2 PCS di CB001) ke Work Order aktif #WO003. Transaksi di-rollback otomatis, stok tidak minus.',
-    },
-    {
-      id: 4,
-      title: 'Skenario #4: User Tanpa Privilege (RBAC Violation)',
-      expectedStatus: 403,
-      expectedBadge: '403 Forbidden',
-      endpoint: 'POST /api/operations/payments (Token Role: mekanik / user_mekanik)',
-      mechanism:
-        'JWT Role Middleware (authorizeRoles("owner", "admin_cabang", "kasir")) yang selaras dengan GRANT/REVOKE di Kelompok1_admin_security.sql.',
-      description:
-        'Menggunakan JWT token milik role "mekanik" (user_mekanik) untuk mengakses fitur pencatatan pembayaran kasir. Middleware wajib menolak dengan HTTP 403 Forbidden.',
-    },
-    {
-      id: 5,
-      title: 'Skenario #5: Query Laporan Rentang Tanggal Kosong',
-      expectedStatus: 200,
-      expectedBadge: '200 OK (Empty State)',
-      endpoint: 'GET /api/analytics/branch-revenue?startDate=2025-01-01&endDate=2025-01-31',
-      mechanism:
-        'Penggunaan COALESCE(SUM(jumlah_bayar), 0) pada query JOIN PostgreSQL ("CABANG" + "WORK_ORDER" + fn_hitung_total_tagihan) dan validasi parameter tanggal.',
-      description:
-        'Meminta laporan pendapatan cabang pada periode Januari 2025 yang tidak memiliki transaksi. Sistem mengembalikan 200 OK dengan data: [] dan total_pendapatan: 0 (bukan NULL).',
-    },
-  ];
-
-  const executeScenario = async (scenarioId) => {
-    setRunningScenario(scenarioId);
-    const startedAt = performance.now();
-    try {
-      const targets = sysInfo?.testTargets || {};
-
-      if (scenarioId === 1) {
-        try {
-          await api.createWorkOrder({
-            cabang_id: 'CB001',
-            motor_id: null,
-            keluhan: 'Pengujian Skenario #1: Work Order tanpa unit motor',
-          });
-        } catch (err) {
-          const elapsed = Math.round(performance.now() - startedAt);
-          setResults((prev) => ({
-            ...prev,
-            1: {
-              passed: err.status === 400,
-              actualStatus: err.status,
-              elapsedMs: elapsed,
-              requestPayload: {
-                cabang_id: 'CB001',
-                motor_id: null,
-                keluhan: 'Pengujian Skenario #1: Work Order tanpa unit motor',
-              },
-              responsePayload: err.payload,
-            },
-          }));
-        }
-      } else if (scenarioId === 2) {
-        const paidWoId = targets.paid_wo_id || 'WO001';
-        try {
-          await api.createPayment({
-            work_order_id: paidWoId,
-            metode_pembayaran: 'TUNAI',
-            jumlah_bayar: 175000,
-            catatan: 'Pengujian Skenario #2: Pembayaran Dobel',
-          });
-        } catch (err) {
-          const elapsed = Math.round(performance.now() - startedAt);
-          setResults((prev) => ({
-            ...prev,
-            2: {
-              passed: err.status === 409,
-              actualStatus: err.status,
-              elapsedMs: elapsed,
-              requestPayload: {
-                work_order_id: paidWoId,
-                nomor_wo: targets.paid_wo_nomor || 'WO001',
-                metode_pembayaran: 'TUNAI',
-                jumlah_bayar: 175000,
-              },
-              responsePayload: err.payload,
-            },
-          }));
-        }
-      } else if (scenarioId === 3) {
-        const activeWoId = targets.active_wo_id || 'WO003';
-        const lowPartId = targets.low_stock_part_id || 'SC008';
-        try {
-          await api.addSparepartToWo(activeWoId, {
-            suku_cadang_id: lowPartId,
-            jumlah: 50,
-          });
-        } catch (err) {
-          const elapsed = Math.round(performance.now() - startedAt);
-          setResults((prev) => ({
-            ...prev,
-            3: {
-              passed: err.status === 422,
-              actualStatus: err.status,
-              elapsedMs: elapsed,
-              requestPayload: {
-                work_order_id: activeWoId,
-                suku_cadang_id: lowPartId,
-                kode_sku: targets.low_stock_sku || 'SC008',
-                stok_tersedia: targets.low_stock_qty ?? 2,
-                jumlah_diminta: 50,
-              },
-              responsePayload: err.payload,
-            },
-          }));
-        }
-      } else if (scenarioId === 4) {
-        const roleRes = await api.getRoleTestToken('mekanik');
-        const mekanikToken = roleRes.data.token;
-        try {
-          await api.createPayment(
-            {
-              work_order_id: targets.active_wo_id || 'WO003',
-              metode_pembayaran: 'TUNAI',
-              jumlah_bayar: 150000,
-            },
-            mekanikToken
-          );
-        } catch (err) {
-          const elapsed = Math.round(performance.now() - startedAt);
-          setResults((prev) => ({
-            ...prev,
-            4: {
-              passed: err.status === 403,
-              actualStatus: err.status,
-              elapsedMs: elapsed,
-              requestPayload: {
-                authenticatedRole: 'mekanik (@user_mekanik)',
-                targetEndpoint: 'POST /api/operations/payments',
-                requiredRoles: ['owner', 'admin_cabang', 'kasir'],
-              },
-              responsePayload: err.payload,
-            },
-          }));
-        }
-      } else if (scenarioId === 5) {
-        const res = await api.getBranchRevenueReport({
-          startDate: '2025-01-01',
-          endDate: '2025-01-31',
-        });
-        const elapsed = Math.round(performance.now() - startedAt);
-        const passed =
-          res.status === 200 &&
-          Array.isArray(res.data) &&
-          res.data.length === 0 &&
-          res.total_pendapatan === 0;
-
-        setResults((prev) => ({
-          ...prev,
-          5: {
-            passed,
-            actualStatus: res.status,
-            elapsedMs: elapsed,
-            requestPayload: {
-              endpoint: 'GET /api/analytics/branch-revenue',
-              startDate: '2025-01-01',
-              endDate: '2025-01-31',
-            },
-            responsePayload: {
-              success: res.success,
-              status: res.status,
-              total_pendapatan: res.total_pendapatan,
-              data: res.data,
-              summary: res.summary,
-            },
-          },
-        }));
-      }
-    } finally {
-      setRunningScenario(null);
-    }
-  };
-
-  const runAllScenarios = async () => {
-    for (const sc of scenarios) {
-      await executeScenario(sc.id);
-    }
-  };
 
   const handleResetDatabase = async () => {
     setResetting(true);
@@ -283,11 +63,11 @@ export default function SystemDiagnosticsPage() {
           <div className="flex items-center gap-2">
             <Bug className="w-5 h-5 text-[#0969da]" />
             <h1 className="text-base font-bold text-[#1f2328]">
-              System Diagnostics, 5 Debugging Scenarios &amp; Audit Log Viewer
+              PostgreSQL Audit
             </h1>
           </div>
           <p className="text-xs text-[#656d76] mt-0.5">
-            Panel interaktif <em>1-Click Test</em> untuk memverifikasi ke-5 skenario debugging PostgreSQL Kelompok 1 &amp; Express.js beserta pemantauan tabel <code className="font-mono">"AUDIT_LOG"</code> JSONB.
+            Panel monitoring untuk memantau aktivitas perubahan data melalui tabel <code className="font-mono">"AUDIT_LOG"</code>, objek database PostgreSQL, serta verifikasi backup dan recovery Kelompok 1.
           </p>
         </div>
 
@@ -301,16 +81,6 @@ export default function SystemDiagnosticsPage() {
             <RotateCcw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin' : ''}`} />
             <span>{resetting ? 'Mereset DB...' : 'Reset Database Seed'}</span>
           </button>
-
-          <button
-            type="button"
-            disabled={runningScenario !== null}
-            onClick={runAllScenarios}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white cursor-pointer"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>Run All 5 Scenarios (1-Click)</span>
-          </button>
         </div>
       </div>
 
@@ -322,102 +92,6 @@ export default function SystemDiagnosticsPage() {
           onClose={() => setAlert(null)}
         />
       )}
-
-      {/* 5 Debugging Scenarios Cards */}
-      <div className="space-y-4">
-        {scenarios.map((sc) => {
-          const res = results[sc.id];
-          const isRunning = runningScenario === sc.id;
-
-          return (
-            <div
-              key={sc.id}
-              className="bg-white border border-[#d0d7de] rounded-md overflow-hidden"
-            >
-              <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center flex-wrap gap-2">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-200 text-[#1f2328]">
-                    TEST #{sc.id}
-                  </span>
-                  <h2 className="text-sm font-semibold text-[#1f2328]">{sc.title}</h2>
-                  <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-300">
-                    Expected: {sc.expectedBadge}
-                  </span>
-                  {res && (
-                    <span
-                      className={`inline-flex items-center gap-1 font-mono text-xs font-bold px-2.5 py-0.5 rounded-full border ${
-                        res.passed
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                          : 'bg-red-50 text-red-700 border-red-300'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>
-                        {res.passed ? 'PASSED' : 'FAILED'} (HTTP {res.actualStatus} &middot;{' '}
-                        {res.elapsedMs}ms)
-                      </span>
-                    </span>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isRunning}
-                  onClick={() => executeScenario(sc.id)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#0969da] hover:bg-[#0860ca] text-white cursor-pointer"
-                >
-                  <Play className="w-3.5 h-3.5" />
-                  <span>{isRunning ? 'Running...' : `1-Click Test #${sc.id}`}</span>
-                </button>
-              </div>
-
-              <div className="p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
-                <div className="lg:col-span-5 space-y-2">
-                  <div>
-                    <span className="font-semibold text-[#656d76]">Target Endpoint:</span>
-                    <div className="font-mono text-xs text-[#0969da] bg-[#f6f8fa] px-2 py-1 rounded border border-[#d0d7de] mt-0.5">
-                      {sc.endpoint}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="font-semibold text-[#656d76]">
-                      Mekanisme Validasi (Express / PostgreSQL Kelompok 1):
-                    </span>
-                    <p className="text-[#1f2328] mt-0.5 leading-relaxed">{sc.mechanism}</p>
-                  </div>
-                  <div>
-                    <span className="font-semibold text-[#656d76]">Deskripsi Skenario:</span>
-                    <p className="text-[#656d76] mt-0.5 leading-relaxed">{sc.description}</p>
-                  </div>
-                </div>
-
-                <div className="lg:col-span-7">
-                  {!res ? (
-                    <div className="h-full min-h-[130px] rounded-md bg-[#f6f8fa] border border-dashed border-[#d0d7de] flex flex-col items-center justify-center p-4 text-center text-[#656d76]">
-                      <Terminal className="w-5 h-5 mb-1.5 text-[#8c959f]" />
-                      <span>
-                        Klik tombol <strong>1-Click Test #{sc.id}</strong> untuk mengeksekusi request langsung ke Backend &amp; PostgreSQL dan menampilkan respons JSON di sini.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="rounded-md bg-[#1f2328] text-slate-100 p-3 font-mono text-[11px] overflow-x-auto space-y-2">
-                      <div className="flex items-center justify-between text-slate-400 border-b border-slate-700 pb-1.5">
-                        <span>LIVE RESPONSE PAYLOAD (HTTP {res.actualStatus})</span>
-                        <span className="text-emerald-400">
-                          Status Match: {res.actualStatus} === {sc.expectedStatus}
-                        </span>
-                      </div>
-                      <pre className="leading-relaxed whitespace-pre-wrap">
-                        {JSON.stringify(res.responsePayload, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
 
       {/* Live AUDIT_LOG JSONB Viewer (Kelompok 1 trg_audit_log) */}
       <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">

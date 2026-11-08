@@ -50,7 +50,7 @@ export default function AppShell() {
     { to: '/app/operations', label: 'Operations (WO & Kasir)', icon: GitPullRequest },
     { to: '/app/corporate', label: 'Corporate B2B Fleet', icon: Building2, badge: 'NEW' },
     { to: '/app/analytics', label: 'Analytics (4 JOIN)', icon: BarChart3 },
-    { to: '/app/system/diagnostics', label: 'System Diagnostics & Audit', icon: Bug, badge: '5 Tests + Audit' },
+    { to: '/app/system/diagnostics', label: 'PostgreSQL Audit', icon: Bug },
   ];
 
   const currentRoleMeta = ROLE_METADATA[user?.role] || ROLE_METADATA.admin_cabang;
@@ -175,15 +175,6 @@ export default function AppShell() {
             <span className="font-semibold text-[#1f2328]">Kalawa Service ERP (Kelompok 1)</span>
             <span>&middot;</span>
             <span>PostgreSQL 18 Case-Sensitive Schema + Stored Procedures + Corporate B2B Billing</span>
-          </div>
-          <div className="flex items-center gap-3 font-mono text-[11px]">
-            <Link to="/auth/login" className="text-[#0969da] hover:underline">
-              /auth/login
-            </Link>
-            <span>&middot;</span>
-            <Link to="/app/system/diagnostics" className="text-[#0969da] hover:underline">
-              /app/system/diagnostics (5 Scenarios + AUDIT_LOG)
-            </Link>
           </div>
         </div>
       </footer>

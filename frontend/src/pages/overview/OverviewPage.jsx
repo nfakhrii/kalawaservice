@@ -8,7 +8,6 @@ import {
   ArrowUpRight,
   RefreshCw,
   Plus,
-  Bug,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatRupiah, formatNumber, formatDateTime } from '../../utils/formatters';
@@ -61,13 +60,6 @@ export default function OverviewPage() {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
-          <Link
-            to="/app/system/diagnostics"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#0969da] hover:bg-[#0860ca] text-white transition-colors"
-          >
-            <Bug className="w-3.5 h-3.5" />
-            <span>5 Debugging Tests</span>
-          </Link>
           <Link
             to="/app/operations/work-orders/new"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white transition-colors"
