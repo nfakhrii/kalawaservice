@@ -1,13 +1,23 @@
-const jwt = require('jsonwebtoken');
-const authRepository = require('../repositories/authRepository');
-const { verifyPostgresCredentials } = require('../config/db');
-const AppError = require('../utils/AppError');
+const jwt = require("jsonwebtoken");
+const authRepository = require("../repositories/authRepository");
+const {
+  verifyPostgresCredentials,
+  createDatabaseSession,
+  destroyDatabaseSession,
+} = require("../config/db");
+const AppError = require("../utils/AppError");
 
-const JWT_SECRET = process.env.JWT_SECRET || 'kalawa-service-enterprise-secret-key-2026';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = "24h";
+
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error(
+    "JWT_SECRET minimal 32 karakter wajib diatur di backend/.env"
+  );
+}
 
 class AuthService {
-  generateToken(user) {
+  generateToken(user, sessionId) {
     return jwt.sign(
       {
         id: user.id,
@@ -19,9 +29,13 @@ class AuthService {
         cabang_id: user.cabang_id,
         kode_cabang: user.kode_cabang,
         nama_cabang: user.nama_cabang,
+        sid: sessionId,
       },
       JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
+      {
+        expiresIn: JWT_EXPIRES_IN,
+        algorithm: "HS256",
+      }
     );
   }
 
@@ -43,86 +57,68 @@ class AuthService {
 
   async login(username, password) {
     if (!username || !password) {
-      throw new AppError('Username dan password wajib diisi.', 400, 'MISSING_CREDENTIALS');
+      throw new AppError(
+        "Username dan password wajib diisi.",
+        400,
+        "MISSING_CREDENTIALS"
+      );
     }
 
-    const user = await authRepository.findByUsername(username.trim());
+    const user = await authRepository.findByUsername(String(username).trim());
+
     if (!user) {
       throw new AppError(
-        `Akun PostgreSQL '${username}' tidak ditemukan dalam daftar role Kelompok 1.`,
+        "Username atau password tidak valid.",
         401,
-        'INVALID_CREDENTIALS'
+        "INVALID_CREDENTIALS"
       );
     }
 
     try {
       await verifyPostgresCredentials(user.username, password);
-    } catch (pgErr) {
+    } catch (_) {
       throw new AppError(
-        `Autentikasi PostgreSQL gagal untuk akun '${user.username}': password tidak valid (SQLSTATE ${pgErr.code || '28P01'}).`,
+        "Username atau password PostgreSQL tidak valid.",
         401,
-        'INVALID_CREDENTIALS'
+        "INVALID_CREDENTIALS"
       );
     }
 
-    const token = this.generateToken(user);
-    return {
-      token,
-      user: this.sanitizeUser(user),
-    };
+    let sessionId = null;
+
+    try {
+      sessionId = await createDatabaseSession(user.username, password);
+
+      const token = this.generateToken(user, sessionId);
+
+      return {
+        token,
+        user: this.sanitizeUser(user),
+      };
+    } catch (err) {
+      if (sessionId) {
+        await destroyDatabaseSession(sessionId).catch(() => {});
+      }
+
+      throw err;
+    }
   }
 
-  async quickSwitchRole(role) {
-    const isDemoSwitchEnabled =
-      process.env.NODE_ENV !== 'production' &&
-      process.env.ENABLE_DEMO_QUICK_SWITCH !== 'false';
+  async logout(sessionId) {
+    await destroyDatabaseSession(sessionId);
+  }
 
-    if (!isDemoSwitchEnabled) {
-      throw new AppError(
-        'Fitur Demo Quick-Switch Role dinonaktifkan pada environment ini.',
-        403,
-        'DEMO_QUICK_SWITCH_DISABLED'
-      );
-    }
-
-    const validRoles = [
-      'owner',
-      'admin_cabang',
-      'kasir',
-      'mekanik',
-      'gudang',
-      'auditor',
-      'user_owner',
-      'user_admin_cabang',
-      'user_kasir',
-      'user_mekanik',
-      'user_gudang',
-      'user_auditor',
-    ];
-    const cleanRole = String(role || '').trim().toLowerCase();
-    if (!validRoles.includes(cleanRole)) {
-      throw new AppError(
-        `Role '${role}' tidak valid. Pilih salah satu dari: owner, admin_cabang, kasir, mekanik, gudang, atau auditor.`,
-        400,
-        'INVALID_ROLE'
-      );
-    }
-
-    const user = await authRepository.findByRole(cleanRole);
-    if (!user) {
-      throw new AppError(`Akun demo untuk role '${role}' tidak ditemukan.`, 404, 'USER_NOT_FOUND');
-    }
-
-    const token = this.generateToken(user);
-    return {
-      token,
-      user: this.sanitizeUser(user),
-    };
+  async quickSwitchRole() {
+    throw new AppError(
+      "Quick-Switch dinonaktifkan. Silakan login menggunakan akun PostgreSQL asli.",
+      403,
+      "QUICK_SWITCH_DISABLED"
+    );
   }
 
   async getDemoUsers() {
     const users = await authRepository.getAllDemoUsers();
-    return users.map((u) => this.sanitizeUser(u));
+    return users.map((user) => this.sanitizeUser(user));
   }
 }
 

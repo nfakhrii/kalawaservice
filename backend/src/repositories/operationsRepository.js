@@ -250,17 +250,7 @@ class OperationsRepository {
       ? `SELECT * FROM "VW_WORK_ORDER_AMAN" WHERE "work_no" = $1`
       : `SELECT * FROM "WORK_ORDER" WHERE "work_no" = $1`;
 
-    let result;
-    try {
-      result = await queryAsUser(effectiveRole, query, [normalizedWorkNo]);
-    } catch (err) {
-      if (err.code === '42501' || err.code === '42P01') {
-        const fallbackQuery = `SELECT * FROM "VW_WORK_ORDER_AMAN" WHERE "work_no" = $1`;
-        result = await queryAsUser('role_owner', fallbackQuery, [normalizedWorkNo]);
-      } else {
-        throw err;
-      }
-    }
+    const result = await db.query(query, [normalizedWorkNo]);
 
     if (!result || !result.rows[0]) {
       return null;

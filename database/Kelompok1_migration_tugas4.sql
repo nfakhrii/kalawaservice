@@ -218,12 +218,16 @@ ALTER FUNCTION fn_status_garansi_by_wo(VARCHAR) SECURITY DEFINER;
 ALTER FUNCTION sp_riwayat_servis(VARCHAR) SECURITY DEFINER;
 ALTER FUNCTION sp_daftar_wo_cabang(TIMESTAMPTZ, TIMESTAMPTZ, VARCHAR) SECURITY DEFINER;
 ALTER FUNCTION trg_fn_kurangi_stok() SECURITY DEFINER;
+ALTER FUNCTION public.trg_fn_kurangi_stok()
+SET search_path = public, pg_temp;
 
 -- 4.b. Perluas fn_audit_log() (tetap SECURITY INVOKER agar CURRENT_USER mencatat
 --      akun PostgreSQL aktif dari SET LOCAL ROLE: user_owner, user_admin_cabang, dll.)
 CREATE OR REPLACE FUNCTION "fn_audit_log"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_data_id VARCHAR(50);
@@ -265,7 +269,7 @@ BEGIN
         )
         VALUES (
             TG_TABLE_NAME, TG_OP, v_data_id,
-            CURRENT_USER, CURRENT_TIMESTAMP,
+            SESSION_USER, CURRENT_TIMESTAMP,
             NULL, to_jsonb(NEW)
         );
         RETURN NEW;
@@ -278,7 +282,7 @@ BEGIN
             )
             VALUES (
                 TG_TABLE_NAME, TG_OP, v_data_id,
-                CURRENT_USER, CURRENT_TIMESTAMP,
+                SESSION_USER, CURRENT_TIMESTAMP,
                 to_jsonb(OLD), to_jsonb(NEW)
             );
         END IF;
@@ -291,7 +295,7 @@ BEGIN
         )
         VALUES (
             TG_TABLE_NAME, TG_OP, v_data_id,
-            CURRENT_USER, CURRENT_TIMESTAMP,
+            SESSION_USER, CURRENT_TIMESTAMP,
             to_jsonb(OLD), NULL
         );
         RETURN OLD;
@@ -428,8 +432,6 @@ FOR EACH ROW EXECUTE FUNCTION trg_fn_lunasi_tagihan_kolektif();
 -- ============================================================================
 
 -- Izinkan trigger fn_audit_log() menulis ke AUDIT_LOG saat dieksekusi oleh role operasional
-GRANT INSERT ON "AUDIT_LOG" TO role_owner, role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang;
-GRANT USAGE, SELECT ON SEQUENCE "AUDIT_LOG_audit_id_seq" TO role_owner, role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang;
 GRANT SELECT ON "AUDIT_LOG" TO role_owner, role_auditor, role_admin_cabang;
 
 -- Hak akses tabel baru Corporate B2B
@@ -453,6 +455,43 @@ GRANT SELECT ON
 TO role_owner, role_admin_cabang, role_kasir, role_mekanik, role_petugas_gudang, role_auditor;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO role_owner;
+
+-- Lindungi isi Audit Trail dari perubahan langsung.
+REVOKE INSERT, UPDATE, DELETE
+ON public."AUDIT_LOG"
+FROM PUBLIC,
+     role_owner,
+     role_admin_cabang,
+     role_kasir,
+     role_mekanik,
+     role_petugas_gudang,
+     role_auditor,
+     user_owner,
+     user_admin_cabang,
+     user_kasir,
+     user_mekanik,
+     user_gudang,
+     user_auditor;
+
+REVOKE USAGE, UPDATE
+ON SEQUENCE public."AUDIT_LOG_audit_id_seq"
+FROM PUBLIC,
+     role_owner,
+     role_admin_cabang,
+     role_kasir,
+     role_mekanik,
+     role_petugas_gudang,
+     role_auditor,
+     user_owner,
+     user_admin_cabang,
+     user_kasir,
+     user_mekanik,
+     user_gudang,
+     user_auditor;
+
+GRANT SELECT
+ON public."AUDIT_LOG"
+TO role_owner, role_admin_cabang, role_auditor;
 
 -- Pastikan REVOKE sensitif dari Kelompok1_admin_security.sql tetap terkunci rapat:
 REVOKE SELECT ON "PELANGGAN" FROM role_kasir, role_mekanik, role_auditor, role_petugas_gudang;

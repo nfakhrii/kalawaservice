@@ -66,7 +66,7 @@ BEGIN
         )
         VALUES (
             TG_TABLE_NAME, TG_OP, v_data_id, 
-            CURRENT_USER, CURRENT_TIMESTAMP, 
+            SESSION_USER, CURRENT_TIMESTAMP, 
             NULL, to_jsonb(NEW)
         );
         RETURN NEW;
@@ -84,7 +84,7 @@ BEGIN
             )
             VALUES (
                 TG_TABLE_NAME, TG_OP, v_data_id, 
-                CURRENT_USER, CURRENT_TIMESTAMP, 
+                SESSION_USER, CURRENT_TIMESTAMP, 
                 to_jsonb(OLD), to_jsonb(NEW)
             );
         END IF;
@@ -101,7 +101,7 @@ BEGIN
         )
         VALUES (
             TG_TABLE_NAME, TG_OP, v_data_id, 
-            CURRENT_USER, CURRENT_TIMESTAMP, 
+            SESSION_USER, CURRENT_TIMESTAMP, 
             to_jsonb(OLD), NULL
         );
         RETURN OLD;

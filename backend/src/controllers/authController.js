@@ -7,7 +7,7 @@ class AuthController {
       const result = await authService.login(username, password);
       return res.status(200).json({
         success: true,
-        message: 'Login berhasil.',
+        message: "Login berhasil.",
         data: result,
       });
     } catch (err) {
@@ -35,6 +35,19 @@ class AuthController {
       return res.status(200).json({
         success: true,
         data: users,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  async logout(req, res, next) {
+    try {
+      await authService.logout(req.user.sid);
+
+      return res.status(200).json({
+        success: true,
+        message: "Logout berhasil. Sesi PostgreSQL ditutup.",
       });
     } catch (err) {
       return next(err);

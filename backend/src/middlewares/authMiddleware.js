@@ -1,8 +1,13 @@
-const jwt = require('jsonwebtoken');
-const AppError = require('../utils/AppError');
-const { runWithUserContext } = require('../config/db');
+const jwt = require("jsonwebtoken");
+const AppError = require("../utils/AppError");
 
-const JWT_SECRET = process.env.JWT_SECRET || 'kalawa-service-enterprise-secret-key-2026';
+const { runWithUserContext, getDatabaseSession } = require("../config/db");
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error("JWT_SECRET tidak valid.");
+}
 
 /**
  * Middleware untuk memverifikasi JWT Token di header Authorization
@@ -10,30 +15,50 @@ const JWT_SECRET = process.env.JWT_SECRET || 'kalawa-service-enterprise-secret-k
  */
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return next(
       new AppError(
-        'Akses ditolak: Token autentikasi (Bearer JWT) tidak ditemukan.',
+        "Token autentikasi tidak ditemukan.",
         401,
-        'UNAUTHORIZED_MISSING_TOKEN'
+        "UNAUTHORIZED_MISSING_TOKEN"
       )
     );
   }
 
-  const token = authHeader.split(' ')[1];
+  const token = authHeader.slice(7);
+
+  let decoded;
+
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    return runWithUserContext(decoded, () => next());
-  } catch (_err) {
+    decoded = jwt.verify(token, JWT_SECRET, {
+      algorithms: ["HS256"],
+    });
+  } catch (_) {
     return next(
       new AppError(
-        'Sesi tidak valid atau telah kedaluwarsa. Silakan login kembali.',
+        "Token tidak valid atau kedaluwarsa.",
         401,
-        'UNAUTHORIZED_INVALID_TOKEN'
+        "UNAUTHORIZED_INVALID_TOKEN"
       )
     );
   }
+
+  const session = getDatabaseSession(decoded.sid);
+
+  if (!session || session.username !== decoded.username) {
+    return next(
+      new AppError(
+        "Sesi PostgreSQL sudah tidak aktif. Silakan login kembali.",
+        401,
+        "DATABASE_SESSION_EXPIRED"
+      )
+    );
+  }
+
+  req.user = decoded;
+
+  return runWithUserContext(decoded, () => next());
 }
 
 /**
@@ -52,16 +77,18 @@ function authorizeRoles(...allowedRoles) {
     if (!req.user || !req.user.role) {
       return next(
         new AppError(
-          'Identitas pengguna tidak terautentikasi.',
+          "Identitas pengguna tidak terautentikasi.",
           401,
-          'UNAUTHORIZED_USER'
+          "UNAUTHORIZED_USER"
         )
       );
     }
 
-    const rawRole = String(req.user.role || '').toLowerCase();
-    const rawDbRole = String(req.user.db_role || `role_${rawRole}`).toLowerCase();
-    const rawUsername = String(req.user.username || '').toLowerCase();
+    const rawRole = String(req.user.role || "").toLowerCase();
+    const rawDbRole = String(
+      req.user.db_role || `role_${rawRole}`
+    ).toLowerCase();
+    const rawUsername = String(req.user.username || "").toLowerCase();
 
     const allowedSet = new Set(
       allowedRoles.map((r) => String(r).toLowerCase().trim())
@@ -73,15 +100,23 @@ function authorizeRoles(...allowedRoles) {
       allowedSet.has(rawUsername) ||
       allowedSet.has(`role_${rawRole}`) ||
       allowedSet.has(`user_${rawRole}`) ||
-      ((rawRole === 'owner' || rawDbRole === 'role_owner' || rawUsername === 'user_owner') &&
-        (allowedSet.has('owner') || allowedSet.has('role_owner') || allowedSet.has('user_owner')));
+      ((rawRole === "owner" ||
+        rawDbRole === "role_owner" ||
+        rawUsername === "user_owner") &&
+        (allowedSet.has("owner") ||
+          allowedSet.has("role_owner") ||
+          allowedSet.has("user_owner")));
 
     if (!isAllowed) {
       return next(
         new AppError(
-          `Akses Ditolak (RBAC Violation): Akun '${req.user.username}' dengan role '${rawRole}' (${rawDbRole}) tidak memiliki hak akses (privilege) untuk menjalankan operasi ini. Role yang diizinkan: [${allowedRoles.join(', ')}].`,
+          `Akses Ditolak (RBAC Violation): Akun '${
+            req.user.username
+          }' dengan role '${rawRole}' (${rawDbRole}) tidak memiliki hak akses (privilege) untuk menjalankan operasi ini. Role yang diizinkan: [${allowedRoles.join(
+            ", "
+          )}].`,
           403,
-          'FORBIDDEN_INSUFFICIENT_PRIVILEGE',
+          "FORBIDDEN_INSUFFICIENT_PRIVILEGE",
           {
             currentUser: req.user.username,
             currentRole: rawRole,
