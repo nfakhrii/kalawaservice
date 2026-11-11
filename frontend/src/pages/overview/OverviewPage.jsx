@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   GitPullRequest,
   Building2,
@@ -8,26 +8,34 @@ import {
   ArrowUpRight,
   RefreshCw,
   Plus,
-} from 'lucide-react';
-import { api } from '../../services/api';
-import { formatRupiah, formatNumber, formatDateTime } from '../../utils/formatters';
+} from "lucide-react";
+import { api } from "../../services/api";
+import {
+  formatRupiah,
+  formatNumber,
+  formatDateTime,
+} from "../../utils/formatters";
 import {
   WoStatusBadge,
   CustomerTypeBadge,
   StockStatusBadge,
-} from '../../components/ui/GitHubComponents';
+} from "../../components/ui/GitHubComponents";
 
 export default function OverviewPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchOverview = async () => {
     setLoading(true);
+    setError("");
     try {
       const res = await api.getOverview();
       setData(res.data);
     } catch (err) {
       console.error(err);
+      setError("Gagal memuat Overview. Periksa koneksi dan hak akses akun.");
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -38,17 +46,31 @@ export default function OverviewPage() {
   }, []);
 
   const m = data?.metrics || {};
+  const scope = data?.scope || {};
+  const isGlobal = scope.is_global === true;
+  const isBranchScoped = scope.is_global === false;
+  const scopeLabel = isGlobal
+    ? "Seluruh Cabang"
+    : scope.cabang_kode || "Cabang Pengguna";
+  const isAuditor = scope.role === "auditor";
+  const canCreateWorkOrder = ["owner", "admin_cabang"].includes(scope.role);
+  const canManageContracts = scope.role === "owner";
+  const hasCorporateCredit = isGlobal && !isAuditor;
+  const corporateItems = data?.corporateFleetSummary || [];
 
   return (
     <div className="space-y-5">
-      {/* Top Action Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-[#d0d7de] rounded-md px-4 py-3">
         <div>
           <h1 className="text-base font-semibold text-[#1f2328]">
             Workshop Operations &amp; Corporate Fleet Overview
           </h1>
           <p className="text-xs text-[#656d76] mt-0.5">
-            Ringkasan metrik multi-cabang real-time, status antrean Work Order, plafon kredit korporat B2B, dan peringatan stok minimum.
+            {isGlobal
+              ? "Ringkasan operasional seluruh cabang, Work Order, armada korporat, dan stok minimum."
+              : isBranchScoped
+              ? `Ringkasan operasional ${scopeLabel}, Work Order, aktivitas armada korporat, dan stok minimum cabang.`
+              : "Memuat cakupan data operasional..."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -57,32 +79,56 @@ export default function OverviewPage() {
             onClick={fetchOverview}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#f6f8fa] hover:bg-slate-200/70 border border-[#d0d7de] text-[#1f2328] transition-colors cursor-pointer"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+            />
             <span>Refresh</span>
           </button>
-          <Link
-            to="/app/operations/work-orders/new"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Work Order</span>
-          </Link>
+          {canCreateWorkOrder && (
+            <Link
+              to="/app/operations/work-orders/new"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Work Order</span>
+            </Link>
+          )}
         </div>
       </div>
 
-      {/* 4 Primary KPI Cards */}
+      {error && (
+        <div
+          role="alert"
+          className="border border-red-300 bg-red-50 text-red-800 text-xs rounded-md p-3"
+        >
+          {error}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-[#d0d7de] rounded-md p-4">
           <div className="flex items-center justify-between text-xs text-[#656d76]">
-            <span className="font-medium">Total Pendapatan Terealisasi</span>
+            <span className="font-medium">Total Nilai Tagihan Work Order</span>
             <Banknote className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="mt-2 font-mono text-lg font-bold text-[#1f2328] tabular-nums">
             {formatRupiah(m.total_pendapatan)}
           </div>
-          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex items-center justify-between text-[11px] text-[#656d76]">
-            <span>Tunai/QRIS: <strong className="font-mono text-[#1f2328]">{formatRupiah(m.pendapatan_tunai_lunas)}</strong></span>
-            <span>B2B Plafon: <strong className="font-mono text-blue-700">{formatRupiah(m.piutang_plafon_korporat)}</strong></span>
+          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex flex-wrap items-center justify-between gap-1 text-[11px] text-[#656d76]">
+            <span>
+              Lunas:{" "}
+              <strong className="font-mono text-[#1f2328]">
+                {formatRupiah(m.pendapatan_tunai_lunas)}
+              </strong>
+            </span>
+            {!isAuditor && m.piutang_plafon_korporat != null && (
+              <span>
+                B2B Belum Lunas:{" "}
+                <strong className="font-mono text-blue-700">
+                  {formatRupiah(m.piutang_plafon_korporat)}
+                </strong>
+              </span>
+            )}
           </div>
         </div>
 
@@ -92,9 +138,12 @@ export default function OverviewPage() {
             <GitPullRequest className="w-4 h-4 text-[#0969da]" />
           </div>
           <div className="mt-2 font-mono text-lg font-bold text-[#1f2328] tabular-nums">
-            {formatNumber(m.total_work_orders)} <span className="text-xs font-normal text-[#656d76]">Work Orders</span>
+            {formatNumber(m.total_work_orders)}{" "}
+            <span className="text-xs font-normal text-[#656d76]">
+              Work Orders
+            </span>
           </div>
-          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex items-center gap-2 text-[11px]">
+          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex items-center flex-wrap gap-2 text-[11px]">
             <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 font-mono">
               antre: {m.wo_antre || 0}
             </span>
@@ -113,13 +162,27 @@ export default function OverviewPage() {
             <Building2 className="w-4 h-4 text-[#0969da]" />
           </div>
           <div className="mt-2 font-mono text-lg font-bold text-[#1f2328] tabular-nums">
-            {formatNumber(m.kontrak_aktif)} <span className="text-xs font-normal text-[#656d76]">Kontrak Aktif</span>
+            {formatNumber(m.kontrak_aktif)}{" "}
+            <span className="text-xs font-normal text-[#656d76]">
+              Kontrak Aktif
+            </span>
           </div>
-          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex items-center justify-between text-[11px] text-[#656d76]">
-            <span>Pelanggan: <strong className="font-mono text-[#1f2328]">{m.pelanggan_individu || 0} B2C / {m.pelanggan_korporat || 0} B2B</strong></span>
-            <Link to="/app/corporate/contracts" className="text-[#0969da] hover:underline font-medium">
-              Detail &rarr;
-            </Link>
+          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex items-center justify-between gap-2 text-[11px] text-[#656d76]">
+            <span>
+              Pelanggan:{" "}
+              <strong className="font-mono text-[#1f2328]">
+                {m.pelanggan_individu || 0} B2C / {m.pelanggan_korporat || 0}{" "}
+                B2B
+              </strong>
+            </span>
+            {canManageContracts && (
+              <Link
+                to="/app/corporate/contracts"
+                className="text-[#0969da] hover:underline font-medium"
+              >
+                Detail &rarr;
+              </Link>
+            )}
           </div>
         </div>
 
@@ -129,20 +192,29 @@ export default function OverviewPage() {
             <AlertTriangle className="w-4 h-4 text-amber-600" />
           </div>
           <div className="mt-2 font-mono text-lg font-bold text-amber-700 tabular-nums">
-            {formatNumber(m.jumlah_stok_kritis)} <span className="text-xs font-normal text-[#656d76]">SKU di Bawah Minimum</span>
+            {formatNumber(m.jumlah_stok_kritis)}{" "}
+            <span className="text-xs font-normal text-[#656d76]">
+              SKU di Bawah Minimum
+            </span>
           </div>
-          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex items-center justify-between text-[11px] text-[#656d76]">
-            <span>Total Unit Motor: <strong className="font-mono text-[#1f2328]">{m.total_motor || 0} unit</strong></span>
-            <Link to="/app/analytics/low-stock" className="text-[#0969da] hover:underline font-medium">
+          <div className="mt-2 pt-2 border-t border-[#d0d7de] flex items-center justify-between gap-2 text-[11px] text-[#656d76]">
+            <span>
+              Total Unit Motor:{" "}
+              <strong className="font-mono text-[#1f2328]">
+                {m.total_motor || 0} unit
+              </strong>
+            </span>
+            <Link
+              to="/app/analytics/low-stock"
+              className="text-[#0969da] hover:underline font-medium"
+            >
               Restock &rarr;
             </Link>
           </div>
         </div>
       </div>
 
-      {/* Main Grid: Active Work Order Queue Table + Branch & Corporate Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left 8 Cols: Recent Work Orders Table */}
         <div className="lg:col-span-8 bg-white border border-[#d0d7de] rounded-md overflow-hidden">
           <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -158,7 +230,6 @@ export default function OverviewPage() {
               Lihat Semua Work Order <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
           </div>
-
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -172,7 +243,10 @@ export default function OverviewPage() {
               </thead>
               <tbody className="divide-y divide-[#d0d7de] text-xs">
                 {(data?.recentWorkOrders || []).map((wo, index) => (
-                  <tr key={wo.work_no || wo.id || index} className="hover:bg-[#f6f8fa]/70 transition-colors">
+                  <tr
+                    key={wo.work_no || wo.id || index}
+                    className="hover:bg-[#f6f8fa]/70 transition-colors"
+                  >
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <Link
                         to={`/app/operations/work-orders/${wo.nomor_wo}`}
@@ -181,7 +255,8 @@ export default function OverviewPage() {
                         {wo.nomor_wo}
                       </Link>
                       <div className="font-mono text-[10px] text-[#656d76]">
-                        {wo.kode_cabang} &middot; {formatDateTime(wo.waktu_masuk)}
+                        {wo.kode_cabang} &middot;{" "}
+                        {formatDateTime(wo.waktu_masuk)}
                       </div>
                     </td>
                     <td className="py-2.5 px-3">
@@ -208,75 +283,127 @@ export default function OverviewPage() {
                     </td>
                   </tr>
                 ))}
+                {(data?.recentWorkOrders || []).length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-5 text-center text-[#656d76]"
+                    >
+                      Tidak ada Work Order untuk cakupan ini.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* Right 4 Cols: Corporate Credit Limit Monitor & Low Stock */}
         <div className="lg:col-span-4 space-y-5">
-          {/* Corporate Credit Limit Card */}
           <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
             <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[#1f2328]">
-                Plafon Kredit Korporat (B2B)
+                {hasCorporateCredit
+                  ? "Plafon Kredit Korporat (B2B)"
+                  : "Aktivitas Armada Korporat"}
               </h2>
-              <Link to="/app/corporate/contracts" className="text-xs text-[#0969da] hover:underline">
-                Kelola
-              </Link>
+              {canManageContracts && (
+                <Link
+                  to="/app/corporate/contracts"
+                  className="text-xs text-[#0969da] hover:underline"
+                >
+                  Kelola
+                </Link>
+              )}
             </div>
             <div className="divide-y divide-[#d0d7de]">
-              {(data?.corporateFleetSummary || []).map((corp, index) => (
-                <div key={corp.pelanggan_id || corp.kode_pelanggan || index} className="p-3.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[#1f2328]">{corp.nama_perusahaan}</span>
-                    <span className="font-mono text-[11px] text-[#0969da] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
-                      {corp.total_unit_armada} Motor
-                    </span>
-                  </div>
-                  <div className="font-mono text-[11px] text-[#656d76] mt-0.5">
-                    Kontrak: {corp.nomor_kontrak || '-'}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between text-[11px]">
-                    <span className="text-[#656d76]">Sisa Plafon:</span>
-                    <span className="font-mono font-semibold text-emerald-700 tabular-nums">
-                      {formatRupiah(corp.sisa_plafon)} / {formatRupiah(corp.plafon_kredit)}
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1.5 border border-[#d0d7de]">
-                    <div
-                      className="h-full bg-[#0969da]"
-                      style={{
-                        width: `${Math.min(100, Math.max(4, Number(corp.persentase_utilisasi_plafon || 0)))}%`,
-                      }}
-                    />
-                  </div>
+              {corporateItems.length === 0 ? (
+                <div className="p-4 text-xs text-[#656d76]">
+                  Tidak ada aktivitas korporat yang tercatat.
                 </div>
-              ))}
+              ) : (
+                corporateItems.map((corp, index) => (
+                  <div
+                    key={`${corp.pelanggan_id}-${corp.kontrak_id || index}`}
+                    className="p-3.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-[#1f2328]">
+                        {corp.nama_perusahaan}
+                      </span>
+                      <span className="font-mono text-[11px] text-[#0969da] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
+                        {corp.total_unit_armada} Motor
+                      </span>
+                    </div>
+                    <div className="font-mono text-[11px] text-[#656d76] mt-0.5">
+                      Kontrak: {corp.nomor_kontrak || "-"}
+                    </div>
+                    {hasCorporateCredit ? (
+                      <>
+                        <div className="mt-2 flex items-center justify-between text-[11px]">
+                          <span className="text-[#656d76]">Sisa Plafon:</span>
+                          <span className="font-mono font-semibold text-emerald-700 tabular-nums">
+                            {formatRupiah(corp.sisa_plafon)} /{" "}
+                            {formatRupiah(corp.plafon_kredit)}
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1.5 border border-[#d0d7de]">
+                          <div
+                            className="h-full bg-[#0969da]"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(
+                                  0,
+                                  Number(corp.persentase_utilisasi_plafon || 0)
+                                )
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-[#656d76]">
+                        {isBranchScoped
+                          ? `Unit motor yang pernah dilayani ${scopeLabel}.`
+                          : "Ringkasan armada korporat."}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
-          {/* Low Stock Alerts Card */}
           <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
             <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[#1f2328]">
                 Peringatan Stok Suku Cadang Kritis
               </h2>
-              <Link to="/app/analytics/low-stock" className="text-xs text-[#0969da] hover:underline">
+              <Link
+                to="/app/analytics/low-stock"
+                className="text-xs text-[#0969da] hover:underline"
+              >
                 Laporan
               </Link>
             </div>
             <div className="divide-y divide-[#d0d7de]">
               {(data?.lowStockAlerts || []).map((item, index) => (
                 <div
-                  key={`${item.cabang_kode || 'CB'}-${item.suku_cadang_kode || item.suku_cadang_id || item.kode_sku || index}`}
+                  key={`${item.cabang_kode || "CB"}-${
+                    item.suku_cadang_kode ||
+                    item.suku_cadang_id ||
+                    item.kode_sku ||
+                    index
+                  }`}
                   className="p-3 flex items-center justify-between gap-2 text-xs"
                 >
                   <div className="min-w-0">
                     <div className="font-mono text-[11px] font-semibold text-[#0969da]">
                       {item.kode_sku}
                     </div>
-                    <div className="font-medium text-[#1f2328] truncate">{item.nama_part}</div>
+                    <div className="font-medium text-[#1f2328] truncate">
+                      {item.nama_part}
+                    </div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className="font-mono text-xs font-bold text-red-700 tabular-nums">
@@ -291,6 +418,11 @@ export default function OverviewPage() {
                   </div>
                 </div>
               ))}
+              {(data?.lowStockAlerts || []).length === 0 && (
+                <div className="p-4 text-xs text-[#656d76]">
+                  Tidak ada peringatan stok kritis.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -298,4 +430,3 @@ export default function OverviewPage() {
     </div>
   );
 }
-

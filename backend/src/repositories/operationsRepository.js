@@ -25,35 +25,253 @@ function mapUiStatusToSingleDbStatus(rawStatus) {
 class OperationsRepository {
   getRoleFlags() {
     const user = db.getCurrentUserContext();
-    const role = user?.role || 'admin_cabang';
+
+    if (!user) {
+      throw new AppError("User belum terautentikasi.", 401, "UNAUTHENTICATED");
+    }
+
+    const allowedRoles = [
+      "owner",
+      "auditor",
+      "admin_cabang",
+      "kasir",
+      "mekanik",
+      "gudang",
+    ];
+
+    const role = String(user.role || "").toLowerCase();
+
+    if (!allowedRoles.includes(role)) {
+      throw new AppError(
+        "Role pengguna tidak dikenali atau tidak memiliki akses.",
+        403,
+        "INVALID_ROLE"
+      );
+    }
+
     return {
       role,
-      isRestrictedCustomer: ['kasir', 'mekanik', 'gudang', 'auditor'].includes(role),
-      isRestrictedWo: ['mekanik', 'gudang', 'auditor'].includes(role),
-      isMekanik: role === 'mekanik',
+      isOwner: role === "owner",
+      isAuditor: role === "auditor",
+      isGlobal: ["owner", "auditor"].includes(role),
+      isMekanik: role === "mekanik",
+      isRestrictedCustomer: ["kasir", "mekanik", "gudang", "auditor"].includes(
+        role
+      ),
+      isRestrictedWo: ["mekanik", "gudang", "auditor"].includes(role),
     };
+  }
+
+  // Tambahan
+  getAuthorizedCabangKode() {
+    const user = db.getCurrentUserContext();
+
+    if (!user) {
+      throw new AppError("User belum terautentikasi.", 401, "UNAUTHENTICATED");
+    }
+
+    // Owner dan auditor memiliki akses baca lintas cabang.
+    if (["owner", "auditor"].includes(user.role)) {
+      return null;
+    }
+
+    // Role operasional lainnya wajib memiliki cabang.
+    const cabangKode = user.kode_cabang;
+
+    if (!cabangKode) {
+      throw new AppError(
+        "Cabang user tidak ditemukan.",
+        403,
+        "USER_BRANCH_NOT_FOUND"
+      );
+    }
+
+    return String(cabangKode).trim().toUpperCase();
+  }
+
+  // Tambahan
+  getCurrentMekanikId() {
+    const user = db.getCurrentUserContext();
+
+    if (!user) {
+      throw new AppError("User belum terautentikasi.", 401, "UNAUTHENTICATED");
+    }
+
+    if (user.role !== "mekanik") {
+      return null;
+    }
+
+    const pegawaiId = String(user.pegawai_id || "")
+      .trim()
+      .toUpperCase();
+
+    if (!pegawaiId) {
+      throw new AppError(
+        "Identitas pegawai mekanik tidak ditemukan.",
+        403,
+        "MECHANIC_ID_NOT_FOUND"
+      );
+    }
+
+    return pegawaiId;
+  }
+
+  async assertWorkOrderReadAccess(workNo) {
+    const { role } = this.getRoleFlags();
+
+    // Owner dan auditor dapat membaca WO lintas cabang.
+    if (["owner", "auditor"].includes(role)) {
+      return true;
+    }
+
+    const normalizedWorkNo = String(workNo || "")
+      .trim()
+      .toUpperCase();
+
+    if (role === "mekanik") {
+      const mekanikId = this.getCurrentMekanikId();
+
+      const result = await db.query(
+        `
+      SELECT wo.work_no
+      FROM "VW_WORK_ORDER_AMAN" wo
+      WHERE UPPER(wo.work_no) = $1
+        AND (
+          UPPER(wo.mekanik_id) = $2
+          OR EXISTS (
+            SELECT 1
+            FROM "WO_MEKANIK" wm
+            WHERE UPPER(wm.work_no) = UPPER(wo.work_no)
+              AND UPPER(wm.mekanik_id) = $2
+          )
+        )
+      LIMIT 1;
+      `,
+        [normalizedWorkNo, mekanikId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new AppError(
+          "Work Order tidak ditemukan atau tidak ditugaskan kepada Anda.",
+          404,
+          "WORK_ORDER_NOT_FOUND"
+        );
+      }
+
+      return true;
+    }
+
+    // Admin cabang, kasir, dan gudang tetap dibatasi cabang.
+    const cabangKode = this.getAuthorizedCabangKode();
+
+    const result = await db.query(
+      `
+    SELECT work_no
+    FROM "VW_WORK_ORDER_AMAN"
+    WHERE UPPER(work_no) = $1
+      AND cabang_kode = $2
+    LIMIT 1;
+    `,
+      [normalizedWorkNo, cabangKode]
+    );
+
+    if (result.rows.length === 0) {
+      throw new AppError(
+        "Work Order tidak ditemukan atau tidak dapat diakses.",
+        404,
+        "WORK_ORDER_NOT_FOUND"
+      );
+    }
+
+    return true;
+  }
+
+  assertWritePermission(allowedRoles) {
+    const user = db.getCurrentUserContext();
+
+    if (!user) {
+      throw new AppError("User belum terautentikasi.", 401, "UNAUTHENTICATED");
+    }
+
+    if (!allowedRoles.includes(user.role)) {
+      throw new AppError(
+        "Anda tidak memiliki izin untuk melakukan perubahan ini.",
+        403,
+        "FORBIDDEN"
+      );
+    }
+
+    return user;
+  }
+
+  async assertWorkOrderBranchAccess(workNo, user) {
+    if (user.role === "owner") {
+      return;
+    }
+
+    const cabangKode = user.kode_cabang;
+
+    if (!cabangKode) {
+      throw new AppError(
+        "Cabang pengguna tidak ditemukan.",
+        403,
+        "USER_BRANCH_NOT_FOUND"
+      );
+    }
+
+    const result = await db.query(
+      `
+      SELECT work_no
+      FROM "WORK_ORDER"
+      WHERE work_no = $1
+        AND cabang_kode = $2
+      LIMIT 1
+    `,
+      [workNo, cabangKode]
+    );
+
+    if (result.rows.length === 0) {
+      throw new AppError(
+        "Work Order tidak ditemukan atau tidak dapat diakses.",
+        404,
+        "WORK_ORDER_NOT_FOUND"
+      );
+    }
   }
 
   // ==========================================================================
   // 1. WORK ORDER ("WORK_ORDER" / "VW_WORK_ORDER_AMAN", "WO_JASA", "WO_SUKU_CADANG", "WO_MEKANIK", "GARANSI")
   // ==========================================================================
   async getAllWorkOrders(statusFilter = null, cabangKode = null) {
-    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const { role, isRestrictedCustomer, isRestrictedWo, isMekanik } =
+      this.getRoleFlags();
     const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
-    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+    const customerSource = isRestrictedCustomer
+      ? '"VW_PELANGGAN_AMAN"'
+      : '"PELANGGAN"';
 
     const params = [];
     const conditions = [];
 
-    if (statusFilter && statusFilter !== 'all') {
+    const authorizedCabang = this.getAuthorizedCabangKode();
+
+    // Filter status tetap dipertahankan.
+    if (statusFilter && statusFilter !== "all") {
       const lower = String(statusFilter).toLowerCase();
-      if (lower === 'dibayar' && !isRestrictedWo) {
-        conditions.push(`(wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar')`);
+
+      if (lower === "dibayar" && !isRestrictedWo) {
+        conditions.push(
+          `(wo.pembayaran_status = 'Lunas' OR wo.work_status = 'Dibayar')`
+        );
       } else if (UI_TO_DB_STATUS[lower]) {
         const list = UI_TO_DB_STATUS[lower];
+
         params.push(list);
-        if (lower === 'selesai' && !isRestrictedWo) {
-          conditions.push(`(wo.work_status = ANY($${params.length}) AND wo.pembayaran_status = 'Belum Lunas')`);
+
+        if (lower === "selesai" && !isRestrictedWo) {
+          conditions.push(
+            `(wo.work_status = ANY($${params.length}) AND wo.pembayaran_status = 'Belum Lunas')`
+          );
         } else {
           conditions.push(`wo.work_status = ANY($${params.length})`);
         }
@@ -63,12 +281,35 @@ class OperationsRepository {
       }
     }
 
-    if (cabangKode) {
+    // Pembatasan akses berdasarkan role.
+    if (isMekanik) {
+      const mekanikId = this.getCurrentMekanikId();
+
+      params.push(mekanikId);
+      const mekanikParam = `$${params.length}`;
+
+      conditions.push(`
+    (
+      UPPER(wo.mekanik_id) = ${mekanikParam}
+      OR EXISTS (
+        SELECT 1
+        FROM "WO_MEKANIK" wm
+        WHERE UPPER(wm.work_no) = UPPER(wo.work_no)
+          AND UPPER(wm.mekanik_id) = ${mekanikParam}
+      )
+    )
+  `);
+    } else if (authorizedCabang) {
+      params.push(authorizedCabang);
+      conditions.push(`wo.cabang_kode = $${params.length}`);
+    } else if (cabangKode && role === "owner") {
+      // Owner dapat memilih cabang yang ingin dilihat.
       params.push(String(cabangKode).trim().toUpperCase());
       conditions.push(`wo.cabang_kode = $${params.length}`);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const paymentColumnsSql = isRestrictedWo
       ? `
@@ -190,31 +431,91 @@ class OperationsRepository {
       ORDER BY wo.work_tgl_masuk DESC, wo.work_no DESC;
     `;
 
-    const countsSql = isRestrictedWo
-      ? `
-        SELECT
-          COUNT(*)::INT AS all,
-          COUNT(*) FILTER (WHERE work_status IN ('Dibuat', 'Antre'))::INT AS antre,
-          COUNT(*) FILTER (WHERE work_status IN ('Diproses', 'Dikerjakan'))::INT AS dikerjakan,
-          COUNT(*) FILTER (WHERE work_status = 'Selesai')::INT AS selesai,
-          COUNT(*) FILTER (WHERE work_status = 'Dibayar')::INT AS dibayar,
-          COUNT(*) FILTER (WHERE work_status = 'Dibatalkan')::INT AS dibatalkan
-        FROM "VW_WORK_ORDER_AMAN";
-      `
-      : `
-        SELECT
-          COUNT(*)::INT AS all,
-          COUNT(*) FILTER (WHERE work_status IN ('Dibuat', 'Antre'))::INT AS antre,
-          COUNT(*) FILTER (WHERE work_status IN ('Diproses', 'Dikerjakan'))::INT AS dikerjakan,
-          COUNT(*) FILTER (WHERE work_status = 'Selesai' AND pembayaran_status = 'Belum Lunas')::INT AS selesai,
-          COUNT(*) FILTER (WHERE pembayaran_status = 'Lunas' OR work_status = 'Dibayar')::INT AS dibayar,
-          COUNT(*) FILTER (WHERE work_status = 'Dibatalkan')::INT AS dibatalkan
-        FROM "WORK_ORDER";
-      `;
+    const countParams = [];
+    const countConditions = [];
+
+    let countsSql;
+
+    if (isRestrictedWo) {
+      countsSql = `
+    SELECT
+      COUNT(*)::INT AS all,
+      COUNT(*) FILTER (
+        WHERE work_status IN ('Dibuat', 'Antre')
+      )::INT AS antre,
+      COUNT(*) FILTER (
+        WHERE work_status IN ('Diproses', 'Dikerjakan')
+      )::INT AS dikerjakan,
+      COUNT(*) FILTER (
+        WHERE work_status = 'Selesai'
+      )::INT AS selesai,
+      COUNT(*) FILTER (
+        WHERE work_status = 'Dibayar'
+      )::INT AS dibayar,
+      COUNT(*) FILTER (
+        WHERE work_status = 'Dibatalkan'
+      )::INT AS dibatalkan
+    FROM "VW_WORK_ORDER_AMAN" wo
+  `;
+    } else {
+      countsSql = `
+    SELECT
+      COUNT(*)::INT AS all,
+      COUNT(*) FILTER (
+        WHERE work_status IN ('Dibuat', 'Antre')
+      )::INT AS antre,
+      COUNT(*) FILTER (
+        WHERE work_status IN ('Diproses', 'Dikerjakan')
+      )::INT AS dikerjakan,
+      COUNT(*) FILTER (
+        WHERE work_status = 'Selesai'
+          AND pembayaran_status = 'Belum Lunas'
+      )::INT AS selesai,
+      COUNT(*) FILTER (
+        WHERE pembayaran_status = 'Lunas'
+          OR work_status = 'Dibayar'
+      )::INT AS dibayar,
+      COUNT(*) FILTER (
+        WHERE work_status = 'Dibatalkan'
+      )::INT AS dibatalkan
+    FROM "WORK_ORDER" wo
+  `;
+    }
+
+    if (isMekanik) {
+      const mekanikId = this.getCurrentMekanikId();
+
+      countParams.push(mekanikId);
+      const mekanikParam = `$${countParams.length}`;
+
+      countConditions.push(`
+        (
+          UPPER(wo.mekanik_id) = ${mekanikParam}
+          OR EXISTS (
+            SELECT 1
+            FROM "WO_MEKANIK" wm
+            WHERE UPPER(wm.work_no) = UPPER(wo.work_no)
+              AND UPPER(wm.mekanik_id) = ${mekanikParam}
+          )
+        )
+      `);
+    } else if (authorizedCabang) {
+      countParams.push(authorizedCabang);
+      countConditions.push(`cabang_kode = $${countParams.length}`);
+    } else if (cabangKode && role === "owner") {
+      countParams.push(String(cabangKode).trim().toUpperCase());
+      countConditions.push(`cabang_kode = $${countParams.length}`);
+    }
+
+    if (countConditions.length > 0) {
+      countsSql += ` WHERE ${countConditions.join(" AND ")}`;
+    }
+
+    countsSql += ";";
 
     const [{ rows }, countsRes] = await Promise.all([
       db.query(sql, params),
-      db.query(countsSql),
+      db.query(countsSql, countParams),
     ]);
 
     return {
@@ -230,41 +531,67 @@ class OperationsRepository {
     };
   }
 
-  async getWorkOrderById(workNo, dbRole = 'role_owner') {
-    const normalizedWorkNo = String(workNo || '').trim().toUpperCase();
-    const userCtx = db.getCurrentUserContext();
-    const effectiveRole = userCtx?.db_role || userCtx?.username || dbRole || 'role_owner';
-    const isRestricted = [
-      'role_mekanik',
-      'role_petugas_gudang',
-      'role_auditor',
-      'user_mekanik',
-      'user_gudang',
-      'user_auditor',
-      'mekanik',
-      'gudang',
-      'auditor',
-    ].includes(effectiveRole);
+  async getWorkOrderById(workNo) {
+    const normalizedWorkNo = String(workNo || "")
+      .trim()
+      .toUpperCase();
 
-    const query = isRestricted
-      ? `SELECT * FROM "VW_WORK_ORDER_AMAN" WHERE "work_no" = $1`
-      : `SELECT * FROM "WORK_ORDER" WHERE "work_no" = $1`;
+    if (!normalizedWorkNo) {
+      throw new AppError(
+        "Nomor Work Order tidak valid.",
+        400,
+        "INVALID_WORK_ORDER"
+      );
+    }
 
-    const result = await db.query(query, [normalizedWorkNo]);
+    const { role, isRestrictedWo } = this.getRoleFlags();
 
-    if (!result || !result.rows[0]) {
+    // Periksa hak akses sebelum mengambil detail.
+    await this.assertWorkOrderReadAccess(normalizedWorkNo);
+
+    const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+
+    const result = await db.query(
+      `
+    SELECT *
+    FROM ${woSource}
+    WHERE UPPER(work_no) = $1
+    LIMIT 1;
+    `,
+      [normalizedWorkNo]
+    );
+
+    if (!result.rows[0]) {
       return null;
     }
 
     const detail = await this.getWorkOrderDetail(normalizedWorkNo);
+
     return detail ? { ...result.rows[0], ...detail } : result.rows[0];
   }
 
   async getWorkOrderDetail(woId) {
-    const workNo = String(woId).trim().toUpperCase();
+    const workNo = String(woId || "")
+      .trim()
+      .toUpperCase();
+
+    if (!workNo) {
+      throw new AppError(
+        "Nomor Work Order tidak valid.",
+        400,
+        "INVALID_WORK_ORDER"
+      );
+    }
+
+    // Wajib dilakukan sebelum query header, jasa, suku cadang,
+    // dan mekanik agar detail tidak bisa diakses melalui IDOR.
+    await this.assertWorkOrderReadAccess(workNo);
+
     const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
     const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
-    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+    const customerSource = isRestrictedCustomer
+      ? '"VW_PELANGGAN_AMAN"'
+      : '"PELANGGAN"';
 
     const paymentFieldsSql = isRestrictedWo
       ? `
@@ -469,7 +796,10 @@ class OperationsRepository {
     if (!headerRes.rows[0]) return null;
 
     const header = headerRes.rows[0];
-    const isPaid = !isRestrictedWo && (header.pembayaran_status === 'Lunas' || header.work_status === 'Dibayar');
+    const isPaid =
+      !isRestrictedWo &&
+      (header.pembayaran_status === "Lunas" ||
+        header.work_status === "Dibayar");
 
     const paymentObj = isPaid
       ? {
@@ -477,10 +807,12 @@ class OperationsRepository {
           work_no: header.work_no,
           nomor_kwitansi: `KWT-${header.work_no}`,
           work_order_id: header.work_no,
-          metode_pembayaran: (header.pembayaran_metode || 'Tunai').toUpperCase(),
+          metode_pembayaran: (
+            header.pembayaran_metode || "Tunai"
+          ).toUpperCase(),
           pembayaran_metode: header.pembayaran_metode,
           jumlah_bayar: header.total_tagihan,
-          status_pembayaran: 'LUNAS',
+          status_pembayaran: "LUNAS",
           pembayaran_status: header.pembayaran_status,
           tanggal_bayar: header.work_tgl_selesai || header.work_tgl_masuk,
           catatan: `Pelunasan Work Order #${header.work_no}`,
@@ -501,43 +833,57 @@ class OperationsRepository {
    * Skenario Debugging #1: Jika motor_nopol / motor_id kosong, gagal dengan HTTP 400.
    */
   async createWorkOrder(data, user) {
-    return await db.withTransaction(async (client) => {
-      let workNo = data.work_no || data.nomor_wo;
-      if (!workNo) {
-        const seqRes = await client.query(`
+    return await db
+      .withTransaction(async (client) => {
+        let workNo = data.work_no || data.nomor_wo;
+        if (!workNo) {
+          const seqRes = await client.query(`
           SELECT COALESCE(
             MAX(NULLIF(REGEXP_REPLACE(work_no, '[^0-9]', '', 'g'), '')::INT),
             13
           ) + 1 AS next_seq
           FROM "WORK_ORDER";
         `);
-        workNo = `WO${String(seqRes.rows[0].next_seq).padStart(3, '0')}`;
-      } else {
-        workNo = String(workNo).trim().toUpperCase();
-      }
+          workNo = `WO${String(seqRes.rows[0].next_seq).padStart(3, "0")}`;
+        } else {
+          workNo = String(workNo).trim().toUpperCase();
+        }
 
-      const cabangKode = String(
-        data.cabang_kode || data.cabang_id || user?.kode_cabang || 'CB001'
-      )
-        .trim()
-        .toUpperCase();
+        const authorizedCabang = this.getAuthorizedCabangKode();
+        const cabangKode = authorizedCabang
+          ? authorizedCabang
+          : String(data.cabang_kode || data.cabang_id || "")
+              .trim()
+              .toUpperCase();
 
-      const motorNopol =
-        data.motor_nopol !== undefined
-          ? data.motor_nopol
-          : data.motor_id !== undefined
-          ? data.motor_id
-          : null;
+        if (!cabangKode) {
+          throw new Error("Cabang Work Order wajib ditentukan.");
+        }
 
-      let pelangganTipe = 'Individu';
-      let diskonKontrakRp = 0;
+        // const cabangKode = String(
+        //   data.cabang_kode || data.cabang_id || user?.kode_cabang || "CB001"
+        // )
+        //   .trim()
+        //   .toUpperCase();
 
-      const { isRestrictedCustomer } = this.getRoleFlags();
-      const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+        const motorNopol =
+          data.motor_nopol !== undefined
+            ? data.motor_nopol
+            : data.motor_id !== undefined
+            ? data.motor_id
+            : null;
 
-      if (motorNopol) {
-        const motorRes = await client.query(
-          `
+        let pelangganTipe = "Individu";
+        let diskonKontrakRp = 0;
+
+        const { isRestrictedCustomer } = this.getRoleFlags();
+        const customerSource = isRestrictedCustomer
+          ? '"VW_PELANGGAN_AMAN"'
+          : '"PELANGGAN"';
+
+        if (motorNopol) {
+          const motorRes = await client.query(
+            `
             SELECT
               m.motor_nopol,
               m.pelanggan_id,
@@ -550,43 +896,44 @@ class OperationsRepository {
               ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
             WHERE UPPER(m.motor_nopol) = UPPER($1)
           `,
-          [String(motorNopol).trim()]
+            [String(motorNopol).trim()]
+          );
+
+          if (!motorRes.rows[0]) {
+            throw new AppError(
+              `Data motor dengan nomor polisi '${motorNopol}' tidak ditemukan di tabel "MOTOR".`,
+              400,
+              "VEHICLE_NOT_FOUND"
+            );
+          }
+
+          pelangganTipe = motorRes.rows[0].pelanggan_tipe || "Individu";
+          if (!data.mekanik_id && motorRes.rows[0].mekanik_id_pilihan) {
+            data.mekanik_id = motorRes.rows[0].mekanik_id_pilihan;
+          }
+        }
+
+        const mekanikId = data.mekanik_id || "PG003";
+        const keluhan = data.work_keluhan || data.keluhan;
+
+        let pembayaranMetode = data.pembayaran_metode || "Tunai";
+        if (
+          pelangganTipe === "Korporat" ||
+          String(data.skema_pembayaran || "").toUpperCase() ===
+            "PLAFON_KORPORAT"
+        ) {
+          pembayaranMetode = "Tagihan Kolektif";
+        }
+
+        const diskonNominal = Math.round(
+          Number(
+            data.pembayaran_diskon !== undefined
+              ? data.pembayaran_diskon
+              : data.diskon || diskonKontrakRp || 0
+          )
         );
 
-        if (!motorRes.rows[0]) {
-          throw new AppError(
-            `Data motor dengan nomor polisi '${motorNopol}' tidak ditemukan di tabel "MOTOR".`,
-            400,
-            'VEHICLE_NOT_FOUND'
-          );
-        }
-
-        pelangganTipe = motorRes.rows[0].pelanggan_tipe || 'Individu';
-        if (!data.mekanik_id && motorRes.rows[0].mekanik_id_pilihan) {
-          data.mekanik_id = motorRes.rows[0].mekanik_id_pilihan;
-        }
-      }
-
-      const mekanikId = data.mekanik_id || 'PG003';
-      const keluhan = data.work_keluhan || data.keluhan;
-
-      let pembayaranMetode = data.pembayaran_metode || 'Tunai';
-      if (
-        pelangganTipe === 'Korporat' ||
-        String(data.skema_pembayaran || '').toUpperCase() === 'PLAFON_KORPORAT'
-      ) {
-        pembayaranMetode = 'Tagihan Kolektif';
-      }
-
-      const diskonNominal = Math.round(
-        Number(
-          data.pembayaran_diskon !== undefined
-            ? data.pembayaran_diskon
-            : data.diskon || diskonKontrakRp || 0
-        )
-      );
-
-      const insertWoSql = `
+        const insertWoSql = `
         INSERT INTO "WORK_ORDER" (
           work_no, work_tgl_masuk, work_tgl_selesai,
           work_status, work_keluhan, cabang_kode,
@@ -601,55 +948,56 @@ class OperationsRepository {
         RETURNING work_no;
       `;
 
-      const { rows } = await client.query(insertWoSql, [
-        workNo,
-        keluhan,
-        cabangKode,
-        motorNopol ? String(motorNopol).trim().toUpperCase() : null,
-        mekanikId,
-        diskonNominal,
-        pembayaranMetode,
-      ]);
+        const { rows } = await client.query(insertWoSql, [
+          workNo,
+          keluhan,
+          cabangKode,
+          motorNopol ? String(motorNopol).trim().toUpperCase() : null,
+          mekanikId,
+          diskonNominal,
+          pembayaranMetode,
+        ]);
 
-      const createdWorkNo = rows[0].work_no;
+        const createdWorkNo = rows[0].work_no;
 
-      if (mekanikId) {
-        await client.query(
-          `
+        if (mekanikId) {
+          await client.query(
+            `
             INSERT INTO "WO_MEKANIK" (work_no, mekanik_id, peran_mekanik)
             VALUES ($1, $2, 'Penanggung Jawab')
             ON CONFLICT (work_no, mekanik_id) DO NOTHING;
           `,
-          [createdWorkNo, mekanikId]
-        );
-      }
+            [createdWorkNo, mekanikId]
+          );
+        }
 
-      if (Array.isArray(data.jasa_ids) && data.jasa_ids.length > 0) {
-        for (const rawJasaKode of data.jasa_ids) {
-          await client.query(
-            `
+        if (Array.isArray(data.jasa_ids) && data.jasa_ids.length > 0) {
+          for (const rawJasaKode of data.jasa_ids) {
+            await client.query(
+              `
               INSERT INTO "WO_JASA" (work_no, jasa_kode)
               VALUES ($1, $2)
               ON CONFLICT (work_no, jasa_kode) DO NOTHING;
             `,
-            [createdWorkNo, String(rawJasaKode).trim().toUpperCase()]
-          );
+              [createdWorkNo, String(rawJasaKode).trim().toUpperCase()]
+            );
+          }
         }
-      }
 
-      if (data.kilometer_masuk && motorNopol) {
-        await client.query(
-          `
+        if (data.kilometer_masuk && motorNopol) {
+          await client.query(
+            `
             UPDATE "MOTOR"
             SET motor_kilometer = GREATEST(motor_kilometer, $1)
             WHERE UPPER(motor_nopol) = UPPER($2);
           `,
-          [Number(data.kilometer_masuk), String(motorNopol).trim()]
-        );
-      }
+            [Number(data.kilometer_masuk), String(motorNopol).trim()]
+          );
+        }
 
-      return createdWorkNo;
-    }).then((createdWorkNo) => this.getWorkOrderDetail(createdWorkNo));
+        return createdWorkNo;
+      })
+      .then((createdWorkNo) => this.getWorkOrderDetail(createdWorkNo));
   }
 
   /**
@@ -659,46 +1007,85 @@ class OperationsRepository {
    * ("work_status", "work_tgl_selesai", "work_keluhan")
    */
   async updateWorkOrder(woId, data) {
-    const workNo = String(woId).trim().toUpperCase();
-    const { isRestrictedWo, isMekanik } = this.getRoleFlags();
+    const workNo = String(woId || "")
+      .trim()
+      .toUpperCase();
+
+    const { role, isRestrictedWo, isMekanik } = this.getRoleFlags();
+
+    // Auditor hanya boleh membaca.
+    if (role === "auditor") {
+      throw new AppError(
+        "Auditor hanya memiliki hak akses baca.",
+        403,
+        "READ_ONLY_ROLE"
+      );
+    }
+
+    // Pastikan WO memang ditugaskan kepada mekanik
+    // atau berada dalam cakupan cabang pengguna.
+    await this.assertWorkOrderReadAccess(workNo);
+
     const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
 
     const currentRes = await db.query(
-      `SELECT * FROM ${woSource} WHERE UPPER(work_no) = $1`,
+      `
+    SELECT *
+    FROM ${woSource}
+    WHERE UPPER(work_no) = $1
+    LIMIT 1;
+    `,
       [workNo]
     );
+
     if (!currentRes.rows[0]) {
-      throw new AppError('Work Order tidak ditemukan.', 404, 'WORK_ORDER_NOT_FOUND');
+      throw new AppError(
+        "Work Order tidak ditemukan.",
+        404,
+        "WORK_ORDER_NOT_FOUND"
+      );
     }
 
     const current = currentRes.rows[0];
-    const mappedStatus = mapUiStatusToSingleDbStatus(data.work_status || data.status);
+
+    const mappedStatus = mapUiStatusToSingleDbStatus(
+      data.work_status || data.status
+    );
+
     const nextStatus = mappedStatus || current.work_status;
-    const nextKeluhan = data.work_keluhan || data.keluhan || current.work_keluhan;
+
+    const nextKeluhan =
+      data.work_keluhan || data.keluhan || current.work_keluhan;
 
     if (isMekanik) {
-      // Sesuai Kelompok1_admin_security.sql:
-      // GRANT UPDATE ("work_status", "work_tgl_selesai", "work_keluhan") ON "WORK_ORDER" TO role_mekanik;
+      // Mekanik tidak boleh mengubah penanggung jawab,
+      // diskon, cabang, ataupun kolom pembayaran.
       const nextTglSelesai =
-        ['Selesai', 'Dibayar'].includes(nextStatus) && !current.work_tgl_selesai
+        ["Selesai", "Dibayar"].includes(nextStatus) && !current.work_tgl_selesai
           ? new Date()
           : current.work_tgl_selesai;
+
       const mekUpdateSql = `
-        UPDATE "WORK_ORDER"
-        SET
-          "work_status" = $1,
-          "work_tgl_selesai" = $2,
-          "work_keluhan" = $3
-        WHERE "work_no" = $4;
-      `;
+      UPDATE "WORK_ORDER"
+      SET
+        "work_status" = $1,
+        "work_tgl_selesai" = $2,
+        "work_keluhan" = $3
+      WHERE "work_no" = $4;
+    `;
+
       await db.query(mekUpdateSql, [
         nextStatus,
         nextTglSelesai,
         nextKeluhan,
         current.work_no,
       ]);
+
       return await this.getWorkOrderDetail(current.work_no);
     }
+
+    // Lanjutkan kode update untuk role selain mekanik
+    // mulai dari deklarasi nextMekanik pada kode lama.
 
     const nextMekanik =
       data.mekanik_id !== undefined ? data.mekanik_id : current.mekanik_id;
@@ -709,9 +1096,12 @@ class OperationsRepository {
         ? Math.round(Number(data.diskon))
         : current.pembayaran_diskon || 0;
 
-    let setTglSelesaiSql = 'work_tgl_selesai';
-    if (['Selesai', 'Dibayar'].includes(nextStatus) && !current.work_tgl_selesai) {
-      setTglSelesaiSql = 'COALESCE(work_tgl_selesai, CURRENT_TIMESTAMP)';
+    let setTglSelesaiSql = "work_tgl_selesai";
+    if (
+      ["Selesai", "Dibayar"].includes(nextStatus) &&
+      !current.work_tgl_selesai
+    ) {
+      setTglSelesaiSql = "COALESCE(work_tgl_selesai, CURRENT_TIMESTAMP)";
     }
 
     const sql = `
@@ -748,18 +1138,36 @@ class OperationsRepository {
 
   async addServiceToWorkOrder(woId, jasaArg) {
     const workNo = String(woId).trim().toUpperCase();
+    const { role } = this.getRoleFlags();
+
+    if (role === "auditor") {
+      throw new AppError(
+        "Auditor hanya memiliki hak akses baca.",
+        403,
+        "READ_ONLY_ROLE"
+      );
+    }
+
+    await this.assertWorkOrderReadAccess(workNo);
+
     const rawKode =
-      typeof jasaArg === 'object' && jasaArg !== null
+      typeof jasaArg === "object" && jasaArg !== null
         ? jasaArg.jasa_kode || jasaArg.jasa_servis_id
         : jasaArg;
-    const kodeJasa = String(rawKode || '').trim().toUpperCase();
+    const kodeJasa = String(rawKode || "")
+      .trim()
+      .toUpperCase();
 
     const srvRes = await db.query(
       `SELECT * FROM "JASA_SERVIS" WHERE UPPER(jasa_kode) = $1`,
       [kodeJasa]
     );
     if (!srvRes.rows[0]) {
-      throw new AppError(`Jasa servis '${kodeJasa}' tidak ditemukan.`, 404, 'SERVICE_NOT_FOUND');
+      throw new AppError(
+        `Jasa servis '${kodeJasa}' tidak ditemukan.`,
+        404,
+        "SERVICE_NOT_FOUND"
+      );
     }
 
     await db.query(
@@ -776,6 +1184,18 @@ class OperationsRepository {
 
   async removeServiceFromWorkOrder(woId, itemId) {
     const workNo = String(woId).trim().toUpperCase();
+    const { role } = this.getRoleFlags();
+
+    if (role === "auditor") {
+      throw new AppError(
+        "Auditor hanya memiliki hak akses baca.",
+        403,
+        "READ_ONLY_ROLE"
+      );
+    }
+
+    await this.assertWorkOrderReadAccess(workNo);
+
     const kodeJasa = String(itemId).trim().toUpperCase();
 
     await db.query(
@@ -793,18 +1213,32 @@ class OperationsRepository {
    */
   async addSparepartToWorkOrder(woId, partArg, qtyArg) {
     const workNo = String(woId).trim().toUpperCase();
+    const { role } = this.getRoleFlags();
+
+    if (role === "auditor") {
+      throw new AppError(
+        "Auditor hanya memiliki hak akses baca.",
+        403,
+        "READ_ONLY_ROLE"
+      );
+    }
+
+    await this.assertWorkOrderReadAccess(workNo);
+
     const rawKode =
-      typeof partArg === 'object' && partArg !== null
+      typeof partArg === "object" && partArg !== null
         ? partArg.suku_cadang_kode || partArg.suku_cadang_id
         : partArg;
     const rawQty =
-      typeof partArg === 'object' && partArg !== null
+      typeof partArg === "object" && partArg !== null
         ? partArg.suku_cadang_qty !== undefined
           ? partArg.suku_cadang_qty
           : partArg.jumlah
         : qtyArg;
 
-    const kodePart = String(rawKode || '').trim().toUpperCase();
+    const kodePart = String(rawKode || "")
+      .trim()
+      .toUpperCase();
     const qty = Math.round(Number(rawQty || 1));
 
     const { isRestrictedWo } = this.getRoleFlags();
@@ -816,15 +1250,19 @@ class OperationsRepository {
         [workNo]
       );
       if (!woRes.rows[0]) {
-        throw new AppError(`Work Order '${workNo}' tidak ditemukan.`, 404, 'WORK_ORDER_NOT_FOUND');
+        throw new AppError(
+          `Work Order '${workNo}' tidak ditemukan.`,
+          404,
+          "WORK_ORDER_NOT_FOUND"
+        );
       }
 
       const wo = woRes.rows[0];
-      if (['Dibayar', 'Dibatalkan'].includes(wo.work_status)) {
+      if (["Dibayar", "Dibatalkan"].includes(wo.work_status)) {
         throw new AppError(
           `Work Order #${wo.work_no} sudah berstatus '${wo.work_status}' sehingga tidak dapat diubah lagi.`,
           422,
-          'WORK_ORDER_LOCKED'
+          "WORK_ORDER_LOCKED"
         );
       }
 
@@ -844,7 +1282,11 @@ class OperationsRepository {
       );
 
       if (!partRes.rows[0]) {
-        throw new AppError(`Suku cadang '${kodePart}' tidak ditemukan.`, 404, 'SPAREPART_NOT_FOUND');
+        throw new AppError(
+          `Suku cadang '${kodePart}' tidak ditemukan.`,
+          404,
+          "SPAREPART_NOT_FOUND"
+        );
       }
 
       const part = partRes.rows[0];
@@ -854,10 +1296,10 @@ class OperationsRepository {
         throw new AppError(
           `Stok suku cadang "${part.suku_cadang_nama}" (${part.suku_cadang_kode}) di cabang ${wo.cabang_kode} tidak mencukupi! Stok tersedia: ${stokTersedia} PCS, jumlah diminta: ${qty} PCS.`,
           422,
-          'INSUFFICIENT_SPAREPART_STOCK',
+          "INSUFFICIENT_SPAREPART_STOCK",
           {
-            pgCode: 'P0001',
-            constraint: 'chk_stok_qty',
+            pgCode: "P0001",
+            constraint: "chk_stok_qty",
             cabang_kode: wo.cabang_kode,
             suku_cadang_kode: part.suku_cadang_kode,
             suku_cadang_nama: part.suku_cadang_nama,
@@ -904,6 +1346,17 @@ class OperationsRepository {
 
   async removeSparepartFromWorkOrder(woId, itemId) {
     const workNo = String(woId).trim().toUpperCase();
+    const { role } = this.getRoleFlags();
+
+    if (role === "auditor") {
+      throw new AppError(
+        "Auditor hanya memiliki hak akses baca.",
+        403,
+        "READ_ONLY_ROLE"
+      );
+    }
+
+    await this.assertWorkOrderReadAccess(workNo);
     const kodePart = String(itemId).trim().toUpperCase();
 
     await db.query(
@@ -989,40 +1442,82 @@ class OperationsRepository {
   }
 
   async createPayment(data, _user) {
-    const workNo = String(data.work_no || data.work_order_id)
+    const user = db.getCurrentUserContext();
+
+    // Hanya role berikut yang boleh melakukan pembayaran.
+    const allowedRoles = ["owner", "admin_cabang", "kasir"];
+
+    if (!user || !allowedRoles.includes(user.role)) {
+      throw new AppError(
+        "Anda tidak memiliki izin untuk melakukan pembayaran.",
+        403,
+        "PAYMENT_FORBIDDEN"
+      );
+    }
+
+    // Owner dapat mengakses seluruh cabang.
+    // Admin cabang dan kasir hanya boleh mengakses cabangnya sendiri.
+    const isBranchScoped = ["admin_cabang", "kasir"].includes(user.role);
+
+    const cabangKode = user.kode_cabang || user.cabang_id;
+
+    if (isBranchScoped && !cabangKode) {
+      throw new AppError(
+        "Cabang pengguna tidak ditemukan.",
+        403,
+        "USER_BRANCH_NOT_FOUND"
+      );
+    }
+
+    const workNo = String(data?.work_no || data?.work_order_id || "")
       .trim()
       .toUpperCase();
 
+    if (!workNo) {
+      throw new AppError(
+        "Nomor Work Order wajib diisi.",
+        400,
+        "WORK_ORDER_REQUIRED"
+      );
+    }
+
     return await db.withTransaction(async (client) => {
+      // Pemeriksaan cabang dan penguncian WO berada
+      // dalam transaksi yang sama.
       const woRes = await client.query(
         `
-          SELECT
-            wo.*,
-            fn_hitung_total_tagihan(wo.work_no) AS tagihan_terhitung
-          FROM "WORK_ORDER" wo
-          WHERE UPPER(wo.work_no) = $1
-          FOR UPDATE;
-        `,
-        [workNo]
+        SELECT
+          wo.*,
+          fn_hitung_total_tagihan(wo.work_no) AS tagihan_terhitung
+        FROM "WORK_ORDER" wo
+        WHERE UPPER(wo.work_no) = $1
+          AND ($2::VARCHAR IS NULL OR wo.cabang_kode = $2)
+        FOR UPDATE OF wo;
+      `,
+        [workNo, isBranchScoped ? cabangKode : null]
       );
 
       const wo = woRes.rows[0];
+
       if (!wo) {
+        // Respons 404 juga digunakan untuk WO cabang lain
+        // agar keberadaan WO tersebut tidak dibocorkan.
         throw new AppError(
-          `Work Order '${workNo}' tidak ditemukan.`,
+          `Work Order '${workNo}' tidak ditemukan atau tidak dapat diakses.`,
           404,
-          'WORK_ORDER_NOT_FOUND'
+          "WORK_ORDER_NOT_FOUND"
         );
       }
 
-      // Skenario Debugging #2: Tolak Pembayaran Dobel dengan 409 Conflict!
-      if (wo.pembayaran_status === 'Lunas' || wo.work_status === 'Dibayar') {
+      // Skenario Debugging #2:
+      // Tolak pembayaran ganda dengan HTTP 409 Conflict.
+      if (wo.pembayaran_status === "Lunas" || wo.work_status === "Dibayar") {
         throw new AppError(
           `Penolakan Pembayaran Ganda (Double Payment): Work Order #${wo.work_no} sudah berstatus Lunas ('${wo.pembayaran_status}' / '${wo.work_status}') melalui metode ${wo.pembayaran_metode}.`,
           409,
-          'DOUBLE_PAYMENT_CONFLICT',
+          "DOUBLE_PAYMENT_CONFLICT",
           {
-            pgCode: 'P0002',
+            pgCode: "P0002",
             work_no: wo.work_no,
             nomor_wo: wo.work_no,
             existing_receipt: `KWT-${wo.work_no}`,
@@ -1033,55 +1528,82 @@ class OperationsRepository {
         );
       }
 
-      if (wo.work_status === 'Dibatalkan') {
+      if (wo.work_status === "Dibatalkan") {
         throw new AppError(
           `Work Order #${wo.work_no} telah dibatalkan dan tidak dapat dibayar.`,
           400,
-          'CANCELLED_WORK_ORDER'
+          "CANCELLED_WORK_ORDER"
         );
       }
 
       const rawMethod = String(
-        data.pembayaran_metode || data.metode_pembayaran || wo.pembayaran_metode || 'Tunai'
+        data.pembayaran_metode ||
+          data.metode_pembayaran ||
+          wo.pembayaran_metode ||
+          "Tunai"
       ).toUpperCase();
 
-      let dbMetode = 'Tunai';
-      if (rawMethod.includes('QRIS')) dbMetode = 'QRIS';
-      else if (rawMethod.includes('TRANSFER')) dbMetode = 'Transfer';
-      else if (rawMethod.includes('DEBIT')) dbMetode = 'Debit';
-      else if (rawMethod.includes('KREDIT')) dbMetode = 'Kredit';
-      else if (rawMethod.includes('PLAFON') || rawMethod.includes('KOLEKTIF')) {
-        dbMetode = 'Tagihan Kolektif';
+      let dbMetode = "Tunai";
+
+      if (rawMethod.includes("QRIS")) {
+        dbMetode = "QRIS";
+      } else if (rawMethod.includes("TRANSFER")) {
+        dbMetode = "Transfer";
+      } else if (rawMethod.includes("DEBIT")) {
+        dbMetode = "Debit";
+      } else if (rawMethod.includes("KREDIT")) {
+        dbMetode = "Kredit";
+      } else if (
+        rawMethod.includes("PLAFON") ||
+        rawMethod.includes("KOLEKTIF")
+      ) {
+        dbMetode = "Tagihan Kolektif";
       }
 
-      const isKolektif = dbMetode === 'Tagihan Kolektif';
-      const newPembayaranStatus = isKolektif ? 'Belum Lunas' : 'Lunas';
-      const newWorkStatus = isKolektif ? 'Selesai' : 'Dibayar';
+      const isKolektif = dbMetode === "Tagihan Kolektif";
+
+      const newPembayaranStatus = isKolektif ? "Belum Lunas" : "Lunas";
+
+      const newWorkStatus = isKolektif ? "Selesai" : "Dibayar";
 
       const updateSql = `
-        UPDATE "WORK_ORDER"
-        SET
-          pembayaran_metode = $1,
-          pembayaran_status = $2,
-          work_status = $3,
-          work_tgl_selesai = COALESCE(work_tgl_selesai, CURRENT_TIMESTAMP)
-        WHERE work_no = $4
-        RETURNING
-          work_no,
-          pembayaran_metode,
-          pembayaran_status,
-          work_status,
-          work_tgl_selesai;
-      `;
+      UPDATE "WORK_ORDER"
+      SET
+        pembayaran_metode = $1,
+        pembayaran_status = $2,
+        work_status = $3,
+        work_tgl_selesai = COALESCE(
+          work_tgl_selesai,
+          CURRENT_TIMESTAMP
+        )
+      WHERE work_no = $4
+        AND ($5::VARCHAR IS NULL OR cabang_kode = $5)
+      RETURNING
+        work_no,
+        pembayaran_metode,
+        pembayaran_status,
+        work_status,
+        work_tgl_selesai;
+    `;
 
       const { rows } = await client.query(updateSql, [
         dbMetode,
         newPembayaranStatus,
         newWorkStatus,
         wo.work_no,
+        isBranchScoped ? cabangKode : null,
       ]);
 
       const updated = rows[0];
+
+      if (!updated) {
+        throw new AppError(
+          "Pembayaran gagal karena Work Order tidak dapat diakses.",
+          404,
+          "WORK_ORDER_NOT_FOUND"
+        );
+      }
+
       return {
         id: updated.work_no,
         work_no: updated.work_no,

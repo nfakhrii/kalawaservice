@@ -34,12 +34,26 @@ pool.on("error", (err) => {
 });
 
 const ALLOWED_DB_USERS_AND_ROLES = new Set([
+  // Akun lama
   "user_owner",
   "user_admin_cabang",
   "user_kasir",
   "user_mekanik",
   "user_gudang",
   "user_auditor",
+
+  // Akun baru
+  "user_admin_pg008",
+  "user_admin_pg009",
+  "user_kasir_pg010",
+  "user_kasir_pg011",
+  "user_gudang_pg012",
+  "user_gudang_pg013",
+  "user_mekanik_pg004",
+  "user_mekanik_pg005",
+  "user_mekanik_pg006",
+
+  // Role PostgreSQL
   "role_owner",
   "role_admin_cabang",
   "role_kasir",
@@ -49,12 +63,24 @@ const ALLOWED_DB_USERS_AND_ROLES = new Set([
 ]);
 
 const LOGIN_USERS = new Set([
+  // Akun lama
   "user_owner",
   "user_admin_cabang",
   "user_kasir",
   "user_mekanik",
   "user_gudang",
   "user_auditor",
+
+  // Akun baru
+  "user_admin_pg008",
+  "user_admin_pg009",
+  "user_kasir_pg010",
+  "user_kasir_pg011",
+  "user_gudang_pg012",
+  "user_gudang_pg013",
+  "user_mekanik_pg004",
+  "user_mekanik_pg005",
+  "user_mekanik_pg006",
 ]);
 
 const requestUserStorage = new AsyncLocalStorage();

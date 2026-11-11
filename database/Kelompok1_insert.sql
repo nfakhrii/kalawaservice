@@ -44,7 +44,12 @@ VALUES
 ('PG005', 'CB002', 'Renaldy Pratama', '081300000005', 'Mekanik Spesialis', '2023-03-20', TRUE),
 ('PG006', 'CB003', 'Fajar Hidayat', '081300000006', 'Mekanik Spesialis', '2023-04-10', TRUE),
 ('PG007', 'CB002', 'Gilang Ramadhan', '081300000007', 'Petugas Gudang', '2023-05-05', TRUE),
-('PG008', 'CB003', 'Hendra Setiawan', '081300000008', 'Admin', '2024-01-08', TRUE);
+('PG008', 'CB003', 'Hendra Setiawan', '081300000008', 'Admin', '2024-01-08', TRUE),
+('PG009', 'CB002', 'Andi Pratama', '081300000009', 'Admin', '2024-02-01', TRUE),
+('PG010', 'CB002', 'Rizky Firmansyah', '081300000010', 'Kasir', '2024-02-05', TRUE),
+('PG011', 'CB003', 'Dina Maharani', '081300000011', 'Kasir', '2024-02-10', TRUE),
+('PG012', 'CB001', 'Agus Setiawan', '081300000012', 'Petugas Gudang', '2024-02-15', TRUE),
+('PG013', 'CB003', 'Satria Wijaya', '081300000013', 'Petugas Gudang', '2024-02-20', TRUE);
 
 
 -- =========================================================

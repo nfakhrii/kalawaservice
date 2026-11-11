@@ -61,14 +61,41 @@ WITH PASSWORD 'OwnerKalawa123';
 CREATE USER user_admin_cabang
 WITH PASSWORD 'AdminKalawa123';
 
+CREATE USER user_admin_pg008
+WITH PASSWORD 'AdminKalawa008';
+
+CREATE USER user_admin_pg009
+WITH PASSWORD 'AdminKalawa009';
+
 CREATE USER user_kasir
 WITH PASSWORD 'KasirKalawa123';
+
+CREATE USER user_kasir_pg010
+WITH PASSWORD 'KasirKalawa010';
+
+CREATE USER user_kasir_pg011
+WITH PASSWORD 'KasirKalawa011';
 
 CREATE USER user_mekanik
 WITH PASSWORD 'MekanikKalawa123';
 
+CREATE USER user_mekanik_pg004
+WITH PASSWORD 'MekanikKalawa004';
+
+CREATE USER user_mekanik_pg005
+WITH PASSWORD 'MekanikKalawa005';
+
+CREATE USER user_mekanik_pg006
+WITH PASSWORD 'MekanikKalawa006';
+
 CREATE USER user_gudang
 WITH PASSWORD 'GudangKalawa123';
+
+CREATE USER user_gudang_pg012
+WITH PASSWORD 'GudangKalawa012';
+
+CREATE USER user_gudang_pg013
+WITH PASSWORD 'GudangKalawa013';
 
 CREATE USER user_auditor
 WITH PASSWORD 'AuditorKalawa123';
@@ -82,11 +109,29 @@ GRANT role_owner TO user_owner;
 
 GRANT role_admin_cabang TO user_admin_cabang;
 
+GRANT role_admin_cabang TO user_admin_pg008;
+
+GRANT role_admin_cabang TO user_admin_pg009;
+
 GRANT role_kasir TO user_kasir;
+
+GRANT role_kasir TO user_kasir_pg010;
+
+GRANT role_kasir TO user_kasir_pg011;
 
 GRANT role_mekanik TO user_mekanik;
 
+GRANT role_mekanik TO user_mekanik_pg004;
+
+GRANT role_mekanik TO user_mekanik_pg005;
+
+GRANT role_mekanik TO user_mekanik_pg006;
+
 GRANT role_petugas_gudang TO user_gudang;
+
+GRANT role_petugas_gudang TO user_gudang_pg012;
+
+GRANT role_petugas_gudang TO user_gudang_pg013;
 
 GRANT role_auditor TO user_auditor;
 
