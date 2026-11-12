@@ -189,6 +189,27 @@ class OverviewRepository {
       ? '(SELECT COUNT(*) FROM "AUDIT_LOG")'
       : "0::BIGINT";
 
+    const canViewCorporate = !["mekanik", "gudang"].includes(role);
+
+    const kontrakAktifSql = canViewCorporate
+      ? `(SELECT COUNT(*) FROM "KONTRAK_KORPORAT" kk
+      WHERE kk.status_kontrak = 'Aktif' ${contractPredicate})`
+      : "0::BIGINT";
+
+    const invoiceOutstandingSql = canViewCorporate
+      ? `(SELECT COUNT(*) FROM "TAGIHAN_KOLEKTIF" tk
+          WHERE tk.status_tagihan IN ('Belum Dibayar', 'Belum Lunas')
+          ${
+            cabangKode
+              ? `AND EXISTS (
+                  SELECT 1
+                  FROM scoped_wo wo
+                  WHERE wo.tagihan_id = tk.tagihan_id
+                )`
+              : ""
+          })`
+      : "0::BIGINT";
+
     const kpiSql = `${cte}
       SELECT
         (SELECT COUNT(*) FROM scoped_wo) AS total_work_orders,
@@ -209,17 +230,8 @@ class OverviewRepository {
         (SELECT COUNT(*) FROM "MOTOR" m ${motorPredicate}) AS total_motor,
         (SELECT COUNT(*) FROM "STOK_CABANG" st
          WHERE st.stok_qty <= st.stok_minimum ${stockPredicate}) AS jumlah_stok_kritis,
-        (SELECT COUNT(*) FROM "KONTRAK_KORPORAT" kk
-         WHERE kk.status_kontrak = 'Aktif' ${contractPredicate}) AS kontrak_aktif,
-        (SELECT COUNT(*) FROM "TAGIHAN_KOLEKTIF" tk
-         WHERE tk.status_tagihan IN ('Belum Dibayar', 'Belum Lunas')
-           ${
-             cabangKode
-               ? `AND EXISTS (
-             SELECT 1 FROM scoped_wo wo WHERE wo.tagihan_id = tk.tagihan_id
-           )`
-               : ""
-           }) AS invoice_kolektif_outstanding,
+        ${kontrakAktifSql} AS kontrak_aktif,
+        ${invoiceOutstandingSql} AS invoice_kolektif_outstanding,
         (SELECT COUNT(*) FROM "GARANSI" g
          ${
            cabangKode ? "JOIN scoped_wo wo ON wo.work_no = g.work_no" : ""
@@ -336,19 +348,30 @@ class OverviewRepository {
 
     // For branch users, only corporate customers with WO activity are shown.
     // Global credit and global invoice figures are NEVER returned to them.
+    const creditSource =
+      role === "auditor" ? '"VW_PELANGGAN_KORPORAT_AMAN"' : '"PELANGGAN"';
+
+    const creditJoin = isGlobal
+      ? `LEFT JOIN ${creditSource} cp
+       ON cp.pelanggan_id = p.pelanggan_id`
+      : "";
+
     const creditSelect = isGlobal
-      ? `p.plafon_kredit, p.sisa_plafon,
-         (p.plafon_kredit - p.sisa_plafon) AS plafon_terpakai,
-         CASE WHEN p.plafon_kredit > 0 THEN ROUND(
-           ((p.plafon_kredit - p.sisa_plafon)::NUMERIC / p.plafon_kredit) * 100, 2
-         ) ELSE 0 END AS persentase_utilisasi,
-         CASE WHEN p.plafon_kredit > 0 THEN ROUND(
-           ((p.plafon_kredit - p.sisa_plafon)::NUMERIC / p.plafon_kredit) * 100, 2
-         ) ELSE 0 END AS persentase_utilisasi_plafon,`
-      : `NULL::INTEGER AS plafon_kredit, NULL::INTEGER AS sisa_plafon,
-         NULL::INTEGER AS plafon_terpakai,
-         NULL::NUMERIC AS persentase_utilisasi,
-         NULL::NUMERIC AS persentase_utilisasi_plafon,`;
+      ? `cp.plafon_kredit, cp.sisa_plafon,
+     (cp.plafon_kredit - cp.sisa_plafon) AS plafon_terpakai,
+     CASE WHEN cp.plafon_kredit > 0 THEN ROUND(
+       ((cp.plafon_kredit - cp.sisa_plafon)::NUMERIC /
+         cp.plafon_kredit) * 100, 2
+     ) ELSE 0 END AS persentase_utilisasi,
+     CASE WHEN cp.plafon_kredit > 0 THEN ROUND(
+       ((cp.plafon_kredit - cp.sisa_plafon)::NUMERIC /
+         cp.plafon_kredit) * 100, 2
+     ) ELSE 0 END AS persentase_utilisasi_plafon,`
+      : `NULL::INTEGER AS plafon_kredit,
+     NULL::INTEGER AS sisa_plafon,
+     NULL::INTEGER AS plafon_terpakai,
+     NULL::NUMERIC AS persentase_utilisasi,
+     NULL::NUMERIC AS persentase_utilisasi_plafon,`;
     const npwpSelect = isRestrictedCustomer
       ? "'***REDACTED***'::VARCHAR AS npwp"
       : "p.pelanggan_no_identitas AS npwp";
@@ -372,6 +395,7 @@ class OverviewRepository {
             : `NULL::BIGINT AS tagihan_outstanding_count`
         }
       FROM ${customerSource} p
+      ${creditJoin}
       LEFT JOIN "KONTRAK_KORPORAT" kk
         ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
       LEFT JOIN "MOTOR" m ON m.pelanggan_id = p.pelanggan_id
@@ -392,9 +416,13 @@ class OverviewRepository {
         ${isRestrictedCustomer ? "" : "p.pelanggan_no_identitas,"}
         p.pelanggan_telp, kk.kontrak_id, kk.status_kontrak,
         kk.diskon_kontrak_persen, kk.kuota_motor
-        ${isGlobal ? ", p.plafon_kredit, p.sisa_plafon" : ""}
+        ${isGlobal ? ", cp.plafon_kredit, cp.sisa_plafon" : ""}
       ORDER BY p.pelanggan_id ASC
     `;
+
+    const corporateQuery = canViewCorporate
+      ? db.query(corporateSql, mechanicScopedParams)
+      : Promise.resolve({ rows: [] });
 
     const [kpiRes, recentWoRes, branchRes, lowStockRes, corpRes] =
       await Promise.all([
@@ -402,7 +430,7 @@ class OverviewRepository {
         db.query(recentWoSql, mechanicScopedParams),
         db.query(branchSql, params),
         db.query(lowStockSql, branchParams),
-        db.query(corporateSql, mechanicScopedParams),
+        corporateQuery,
       ]);
 
     return {

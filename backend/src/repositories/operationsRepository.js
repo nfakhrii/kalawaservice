@@ -245,10 +245,61 @@ class OperationsRepository {
   async getAllWorkOrders(statusFilter = null, cabangKode = null) {
     const { role, isRestrictedCustomer, isRestrictedWo, isMekanik } =
       this.getRoleFlags();
+
     const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+
     const customerSource = isRestrictedCustomer
       ? '"VW_PELANGGAN_AMAN"'
       : '"PELANGGAN"';
+
+    // Kasir dan auditor dapat membaca informasi plafon melalui view aman.
+    const canReadCredit = ["kasir", "auditor"].includes(role);
+
+    // Mekanik dan gudang tidak memiliki akses ke tabel kontrak.
+    const canReadContract = !["mekanik", "gudang"].includes(role);
+
+    // Sumber kolom plafon berdasarkan role.
+    const creditFieldsSql = isRestrictedCustomer
+      ? canReadCredit
+        ? `
+        COALESCE(pf.plafon_kredit, 0) AS plafon_kredit,
+        COALESCE(pf.sisa_plafon, 0) AS sisa_plafon,
+      `
+        : `
+        0::NUMERIC AS plafon_kredit,
+        0::NUMERIC AS sisa_plafon,
+      `
+      : `
+        COALESCE(p.plafon_kredit, 0) AS plafon_kredit,
+        COALESCE(p.sisa_plafon, 0) AS sisa_plafon,
+      `;
+
+    // Join view plafon hanya untuk kasir dan auditor.
+    const creditJoinSql = canReadCredit
+      ? `
+      LEFT JOIN "VW_PELANGGAN_KORPORAT_AMAN" pf
+        ON pf.pelanggan_id = p.pelanggan_id
+    `
+      : "";
+
+    // Informasi kontrak hanya diambil oleh role yang memiliki akses.
+    const contractFieldsSql = canReadContract
+      ? `
+        kk.kontrak_id,
+        kk.kontrak_id AS nomor_kontrak,
+      `
+      : `
+        NULL::VARCHAR AS kontrak_id,
+        NULL::VARCHAR AS nomor_kontrak,
+      `;
+
+    const contractJoinSql = canReadContract
+      ? `
+      LEFT JOIN "KONTRAK_KORPORAT" kk
+        ON kk.pelanggan_id = p.pelanggan_id
+        AND kk.status_kontrak = 'Aktif'
+    `
+      : "";
 
     const params = [];
     const conditions = [];
@@ -401,10 +452,8 @@ class OperationsRepository {
         UPPER(COALESCE(p.pelanggan_tipe, 'Individu')) AS tipe_pelanggan,
         COALESCE(p.pelanggan_tipe, 'Individu') AS pelanggan_tipe,
         CASE WHEN p.pelanggan_tipe = 'Korporat' THEN p.pelanggan_nama ELSE NULL END AS nama_perusahaan,
-        COALESCE(p.plafon_kredit, 0) AS plafon_kredit,
-        COALESCE(p.sisa_plafon, 0) AS sisa_plafon,
-        kk.kontrak_id,
-        kk.kontrak_id AS nomor_kontrak,
+        ${creditFieldsSql}
+        ${contractFieldsSql}
         c.cabang_kode AS cabang_id,
         c.cabang_kode,
         c.cabang_kode AS kode_cabang,
@@ -425,8 +474,8 @@ class OperationsRepository {
       JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
       LEFT JOIN "MEKANIK" mk ON mk.mekanik_id = wo.mekanik_id
       LEFT JOIN "PEGAWAI" pg_mek ON pg_mek.pegawai_id = wo.mekanik_id
-      LEFT JOIN "KONTRAK_KORPORAT" kk
-        ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
+      ${creditJoinSql}
+      ${contractJoinSql}
       ${whereClause}
       ORDER BY wo.work_tgl_masuk DESC, wo.work_no DESC;
     `;
@@ -587,11 +636,61 @@ class OperationsRepository {
     // dan mekanik agar detail tidak bisa diakses melalui IDOR.
     await this.assertWorkOrderReadAccess(workNo);
 
-    const { isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+    const { role, isRestrictedCustomer, isRestrictedWo } = this.getRoleFlags();
+
     const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
+
     const customerSource = isRestrictedCustomer
       ? '"VW_PELANGGAN_AMAN"'
       : '"PELANGGAN"';
+
+    const canReadCredit = ["kasir", "auditor"].includes(role);
+    const canReadContract = !["mekanik", "gudang"].includes(role);
+
+    // Sumber informasi plafon.
+    const creditFieldsSql = isRestrictedCustomer
+      ? canReadCredit
+        ? `
+        COALESCE(pf.plafon_kredit, 0) AS plafon_kredit,
+        COALESCE(pf.sisa_plafon, 0) AS sisa_plafon,
+      `
+        : `
+        0::NUMERIC AS plafon_kredit,
+        0::NUMERIC AS sisa_plafon,
+      `
+      : `
+        COALESCE(p.plafon_kredit, 0) AS plafon_kredit,
+        COALESCE(p.sisa_plafon, 0) AS sisa_plafon,
+      `;
+
+    // Join view plafon untuk kasir dan auditor.
+    const creditJoinSql = canReadCredit
+      ? `
+      LEFT JOIN "VW_PELANGGAN_KORPORAT_AMAN" pf
+        ON pf.pelanggan_id = p.pelanggan_id
+    `
+      : "";
+
+    // Informasi kontrak.
+    const contractFieldsSql = canReadContract
+      ? `
+        kk.kontrak_id,
+        kk.kontrak_id AS nomor_kontrak,
+        kk.diskon_kontrak_persen,
+      `
+      : `
+        NULL::VARCHAR AS kontrak_id,
+        NULL::VARCHAR AS nomor_kontrak,
+        0::NUMERIC AS diskon_kontrak_persen,
+      `;
+
+    const contractJoinSql = canReadContract
+      ? `
+      LEFT JOIN "KONTRAK_KORPORAT" kk
+        ON kk.pelanggan_id = p.pelanggan_id
+        AND kk.status_kontrak = 'Aktif'
+    `
+      : "";
 
     const paymentFieldsSql = isRestrictedWo
       ? `
@@ -696,11 +795,8 @@ class OperationsRepository {
         p.pelanggan_telp AS pelanggan_no_hp,
         '-'::VARCHAR AS email_pelanggan,
         ${alamatSelectSql},
-        COALESCE(p.plafon_kredit, 0) AS plafon_kredit,
-        COALESCE(p.sisa_plafon, 0) AS sisa_plafon,
-        kk.kontrak_id,
-        kk.kontrak_id AS nomor_kontrak,
-        kk.diskon_kontrak_persen,
+        ${creditFieldsSql}
+        ${contractFieldsSql}
         c.cabang_kode AS cabang_id,
         c.cabang_kode,
         c.cabang_kode AS kode_cabang,
@@ -716,8 +812,8 @@ class OperationsRepository {
       JOIN "CABANG" c ON c.cabang_kode = wo.cabang_kode
       LEFT JOIN "MEKANIK" mk ON mk.mekanik_id = wo.mekanik_id
       LEFT JOIN "PEGAWAI" pg_mek ON pg_mek.pegawai_id = wo.mekanik_id
-      LEFT JOIN "KONTRAK_KORPORAT" kk
-        ON kk.pelanggan_id = p.pelanggan_id AND kk.status_kontrak = 'Aktif'
+      ${creditJoinSql}
+      ${contractJoinSql}
       LEFT JOIN "GARANSI" g ON g.work_no = wo.work_no
       WHERE UPPER(wo.work_no) = $1;
     `;
