@@ -306,9 +306,11 @@ function query(text, params = []) {
 }
 
 /**
- * Utility untuk me-reset dan mengisi ulang database ke-5 file SQL Kelompok 1
- * secara berurutan (digunakan oleh fitur Reset Demo Data pada System Diagnostics).
- * Dijalankan sebagai superuser pool (tanpa SET LOCAL ROLE).
+ * Utility untuk me-reset dan mengisi ulang database menggunakan
+ * 6 file SQL Kelompok 1 secara berurutan.
+ *
+ * Digunakan oleh fitur Reset Demo Data pada System Diagnostics.
+ * Dijalankan menggunakan koneksi admin pool (tanpa SET LOCAL ROLE).
  */
 async function resetAndSeedDatabase() {
   const dbDir = path.resolve(__dirname, "../../../database");
@@ -319,6 +321,7 @@ async function resetAndSeedDatabase() {
     "Kelompok1_admin_security.sql",
     "Kelompok1_programming.sql",
     "Kelompok1_migration_tugas4.sql",
+    "Kelompok1_migration_security_corporate.sql",
   ];
 
   // Baca semua file SQL secara sinkron (karena hanya dijalankan sekali saat reset)
@@ -340,6 +343,10 @@ async function resetAndSeedDatabase() {
   );
   const migrationSql = fs.readFileSync(
     path.join(dbDir, "Kelompok1_migration_tugas4.sql"),
+    "utf8"
+  );
+  const securityCorporateSql = fs.readFileSync(
+    path.join(dbDir, "Kelompok1_migration_security_corporate.sql"),
     "utf8"
   );
 
@@ -386,6 +393,7 @@ async function resetAndSeedDatabase() {
     await client.query(idempotentSecuritySql);
     await client.query(programmingSql);
     await client.query(migrationSql);
+    await client.query(securityCorporateSql);
     return {
       success: true,
       timestamp: new Date().toISOString(),

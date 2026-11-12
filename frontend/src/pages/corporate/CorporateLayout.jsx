@@ -27,7 +27,7 @@ export default function CorporateLayout() {
                 Corporate B2B Fleet Management &amp; Collective Billing
               </h1>
               <span className="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-blue-50 text-blue-700 border border-blue-300">
-                Perubahan Requirement (02_migration_corporate.sql)
+                
               </span>
             </div>
             <p className="text-xs text-[#656d76] mt-0.5">
