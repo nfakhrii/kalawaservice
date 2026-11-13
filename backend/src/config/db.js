@@ -307,7 +307,7 @@ function query(text, params = []) {
 
 /**
  * Utility untuk me-reset dan mengisi ulang database menggunakan
- * 6 file SQL Kelompok 1 secara berurutan.
+ * 7 file SQL Kelompok 1 secara berurutan.
  *
  * Digunakan oleh fitur Reset Demo Data pada System Diagnostics.
  * Dijalankan menggunakan koneksi admin pool (tanpa SET LOCAL ROLE).
@@ -322,6 +322,7 @@ async function resetAndSeedDatabase() {
     "Kelompok1_programming.sql",
     "Kelompok1_migration_tugas4.sql",
     "Kelompok1_migration_security_corporate.sql",
+    "Kelompok1_migration_security_registry.sql",
   ];
 
   // Baca semua file SQL secara sinkron (karena hanya dijalankan sekali saat reset)
@@ -347,6 +348,10 @@ async function resetAndSeedDatabase() {
   );
   const securityCorporateSql = fs.readFileSync(
     path.join(dbDir, "Kelompok1_migration_security_corporate.sql"),
+    "utf8"
+  );
+  const securityRegistrySql = fs.readFileSync(
+    path.join(dbDir, "Kelompok1_migration_security_registry.sql"),
     "utf8"
   );
 
@@ -394,6 +399,7 @@ async function resetAndSeedDatabase() {
     await client.query(programmingSql);
     await client.query(migrationSql);
     await client.query(securityCorporateSql);
+    await client.query(securityRegistrySql);
     return {
       success: true,
       timestamp: new Date().toISOString(),

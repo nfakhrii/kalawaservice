@@ -69,11 +69,65 @@ router.post('/services', authorizeRoles('owner', 'role_owner', 'admin_cabang'), 
 router.put('/services/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.updateService);
 router.delete('/services/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.deleteService);
 
-// Suku Cadang (Spareparts)
-router.get('/spareparts', registryController.getSpareparts);
-router.post('/spareparts', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'gudang'), registryController.createSparepart);
-router.put('/spareparts/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'gudang'), registryController.updateSparepart);
-router.delete('/spareparts/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.deleteSparepart);
+  // ==========================================================================
+  // SUKU CADANG (SPAREPARTS)
+  // ==========================================================================
+
+  const sparepartReadRoles = [
+    'owner',
+    'admin_cabang',
+    'kasir',
+    'mekanik',
+    'gudang',
+    'auditor'
+  ];
+
+  const sparepartCreateRoles = [
+    'owner',
+    'role_owner'
+  ];
+
+  const sparepartUpdateRoles = [
+    'owner',
+    'role_owner',
+    'gudang',
+    'role_petugas_gudang'
+  ];
+
+  const sparepartDeleteRoles = [
+    'owner',
+    'role_owner'
+  ];
+
+  // Melihat sparepart sesuai batasan cabang masing-masing.
+  router.get(
+    '/spareparts',
+    authorizeRoles(...sparepartReadRoles),
+    registryController.getSpareparts
+  );
+
+  // Membuat master sparepart dan stok awal.
+  // Khusus owner.
+  router.post(
+    '/spareparts',
+    authorizeRoles(...sparepartCreateRoles),
+    registryController.createSparepart
+  );
+
+  // Memperbarui master (owner) atau stok cabang (gudang).
+  router.put(
+    '/spareparts/:id',
+    authorizeRoles(...sparepartUpdateRoles),
+    registryController.updateSparepart
+  );
+
+  // Menghapus master sparepart dan seluruh stok cabangnya.
+  // Khusus owner.
+  router.delete(
+    '/spareparts/:id',
+    authorizeRoles(...sparepartDeleteRoles),
+    registryController.deleteSparepart
+  );
 
 
  // Supplier
