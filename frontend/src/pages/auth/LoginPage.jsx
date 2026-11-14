@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wrench, ArrowRight, Lock, User } from 'lucide-react';
+import {
+  Wrench,
+  ArrowRight,
+  Lock,
+  User,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { AlertBanner } from '../../components/ui/GitHubComponents';
 
@@ -10,6 +17,7 @@ export default function LoginPage() {
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(null);
 
   const handleManualLogin = async (e) => {
@@ -34,9 +42,6 @@ export default function LoginPage() {
           <h1 className="text-xl font-bold text-[#1f2328]">
             Sign in to Kalawa Service ERP
           </h1>
-          <p className="text-xs text-[#656d76] mt-1 font-mono">
-            Skema Asli Kelompok 1 &middot; 6 Role PostgreSQL RBAC (Kelompok1_admin_security.sql)
-          </p>
         </div>
 
         {error && (
@@ -63,7 +68,7 @@ export default function LoginPage() {
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     className="w-full pl-8 pr-3 py-1.5 text-xs font-mono bg-[#f6f8fa] focus:bg-white border border-[#d0d7de] rounded-md focus:outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
-                    placeholder="user_admin_cabang"
+                    placeholder="Masukkan username Anda"
                     required
                   />
                 </div>
@@ -75,18 +80,30 @@ export default function LoginPage() {
                 </label>
                 <div className="relative">
                   <Lock className="w-3.5 h-3.5 text-[#656d76] absolute left-3 top-2.5" />
+
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-8 pr-3 py-1.5 text-xs font-mono bg-[#f6f8fa] focus:bg-white border border-[#d0d7de] rounded-md focus:outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
-                    placeholder="AdminKalawa123"
+                    className="w-full pl-8 pr-10 py-1.5 text-xs font-mono bg-[#f6f8fa] focus:bg-white border border-[#d0d7de] rounded-md focus:outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                    placeholder="Masukkan password Anda"
                     required
                   />
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#656d76] hover:text-[#0969da] cursor-pointer"
+                    aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                    title={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
-                <p className="text-[11px] text-[#656d76] mt-1">
-                  Diverifikasi langsung ke engine PostgreSQL (<code className="font-mono">pg_authid</code>) sesuai password asli <code className="font-mono bg-slate-100 px-1 rounded">*Kalawa123</code> di <code className="font-mono">Kelompok1_admin_security.sql</code>.
-                </p>
               </div>
 
               <button

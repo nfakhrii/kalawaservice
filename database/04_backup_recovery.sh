@@ -9,17 +9,55 @@
 
 set -euo pipefail
 
-# Konfigurasi Koneksi PostgreSQL (dapat di-override via environment variables)
+# ============================================================================
+# KONFIGURASI DATABASE DAN ENVIRONMENT
+# ============================================================================
+
+# Lokasi direktori script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Memuat konfigurasi dari backend/.env
+ENV_FILE="${PROJECT_ROOT}/backend/.env"
+
+if [[ ! -f "${ENV_FILE}" ]]; then
+    echo "[ERROR] File backend/.env tidak ditemukan!"
+    exit 1
+fi
+
+set -a
+source "${ENV_FILE}"
+set +a
+
+# Konfigurasi koneksi PostgreSQL
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-5432}"
 DB_USER="${DB_USER:-postgres}"
-export PGPASSWORD="${DB_PASSWORD:-admin}"
 
-PROD_DB="${DB_NAME:-kalawa_db}"
+if [[ -z "${DB_PASSWORD:-}" ]]; then
+    echo "[ERROR] DB_PASSWORD belum dikonfigurasi di backend/.env"
+    exit 1
+fi
+
+export PGPASSWORD="${DB_PASSWORD}"
+
+# Database utama dan database pengujian recovery
+PROD_DB="${DB_NAME:-kalawaservice}"
 TEST_RECOVERY_DB="${TEST_RECOVERY_DB:-kalawa_db_recovery_test}"
 
-BACKUP_DIR="./backups"
+# Lokasi backup selalu berada di database/backups
+BACKUP_DIR="${SCRIPT_DIR}/backups"
+
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+
+SQL_BACKUP_FILE="${BACKUP_DIR}/kalawa_kelompok1_full_backup_${TIMESTAMP}.sql"
+CUSTOM_BACKUP_FILE="${BACKUP_DIR}/kalawa_kelompok1_full_backup_${TIMESTAMP}.dump"
+
+mkdir -p "${BACKUP_DIR}"
+
+echo "Database utama : ${PROD_DB}"
+echo "Database test  : ${TEST_RECOVERY_DB}"
+echo "Lokasi backup  : ${BACKUP_DIR}"
 SQL_BACKUP_FILE="${BACKUP_DIR}/kalawa_kelompok1_full_backup_${TIMESTAMP}.sql"
 CUSTOM_BACKUP_FILE="${BACKUP_DIR}/kalawa_kelompok1_full_backup_${TIMESTAMP}.dump"
 

@@ -195,5 +195,11 @@ export const api = {
     apiRequest(`/diagnostics/audit-logs?limit=${limit}`),
   resetDatabase: () => apiRequest("/diagnostics/reset-db", { method: "POST" }),
   getRoleTestToken: (role) => apiRequest(`/diagnostics/role-token/${role}`),
+
+  // Membuat backup database secara manual
+  createDiagnosticsBackup: () =>
+    apiRequest("/diagnostics/backup", {
+      method: "POST",
+    }),
 };
 

@@ -36,3 +36,15 @@ SPECIFICATION.md
 ALIGNMENT_PLAN.md
 MASTER_ALIGNMENT_PLAN.md
 MASTER_ALIGNMENT_PLAN.md.md
+
+# Database backup files
+/database/backups/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Backup files
+*.sql
+*.dump
