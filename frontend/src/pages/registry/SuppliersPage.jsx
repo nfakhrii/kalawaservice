@@ -258,7 +258,9 @@ export default function SuppliersPage() {
                   <th className="py-2.5 px-3">Telepon</th>
                   <th className="py-2.5 px-3">Alamat</th>
                   <th className="py-2.5 px-3 text-right">Jumlah SKU</th>
-                  <th className="py-2.5 px-3 text-right">Aksi</th>
+                  {canManageSuppliers && (
+                    <th className="py-2.5 px-3 text-right">Aksi</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#d0d7de] text-xs">
@@ -285,25 +287,27 @@ export default function SuppliersPage() {
                     </td>
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
                       {canManageSuppliers && (
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(s)}
-                            className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-[#f6f8fa] text-[#656d76] hover:text-[#1f2328] cursor-pointer"
-                            title="Edit supplier"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(s)}
+                              className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-[#f6f8fa] text-[#656d76] hover:text-[#1f2328] cursor-pointer"
+                              title="Edit supplier"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(s)}
-                            className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-red-50 text-[#656d76] hover:text-red-600 cursor-pointer"
-                            title="Hapus supplier"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(s)}
+                              className="p-1.5 rounded border border-[#d0d7de] bg-white hover:bg-red-50 text-[#656d76] hover:text-red-600 cursor-pointer"
+                              title="Hapus supplier"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
                       )}
                     </td>
                   </tr>
