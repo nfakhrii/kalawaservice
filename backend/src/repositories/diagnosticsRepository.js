@@ -158,14 +158,34 @@ class DiagnosticsRepository {
     const backupDir = path.resolve(__dirname, "../../../database/backups");
     let backupFiles = [];
     if (fs.existsSync(backupDir)) {
-      backupFiles = fs.readdirSync(backupDir).map((f) => {
-        const stat = fs.statSync(path.join(backupDir, f));
-        return {
-          name: f,
-          sizeBytes: stat.size,
-          modifiedAt: stat.mtime,
-        };
-      });
+      backupFiles = fs.readdirSync(backupDir)
+        .map((f) => {
+          const filePath = path.join(backupDir, f);
+          const stat = fs.statSync(filePath);
+
+          if (!stat.isFile()) return null;
+
+          let backupType = "other";
+
+          if (f.startsWith("kalawa_manual_backup_")) {
+            backupType = "manual";
+          } else if (f.startsWith("kalawa_pre_recovery_backup_")) {
+            backupType = "pre_recovery";
+          }
+
+          return {
+            name: f,
+            sizeBytes: stat.size,
+            modifiedAt: stat.mtime,
+            backupType,
+          };
+        })
+        .filter(Boolean)
+        .sort(
+          (a, b) =>
+            new Date(b.modifiedAt).getTime() -
+            new Date(a.modifiedAt).getTime()
+        );
     }
 
     return {

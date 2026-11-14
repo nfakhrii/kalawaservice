@@ -25,6 +25,12 @@ router.post(
   diagnosticsController.createBackup
 );
 
+router.post(
+  "/recovery",
+  backupAccess,
+  diagnosticsController.restoreBackup
+);
+
 // Reset database melalui HTTP tetap dinonaktifkan.
 router.post("/reset-db", (req, res) => {
   return res.status(403).json({

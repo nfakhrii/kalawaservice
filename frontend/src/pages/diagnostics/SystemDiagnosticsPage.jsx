@@ -17,6 +17,9 @@ export default function SystemDiagnosticsPage() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [resetting, setResetting] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [selectedBackup, setSelectedBackup] = useState('');
+  const [showRecoveryConfirm, setShowRecoveryConfirm] = useState(false);
   const [feedback, setFeedback] = useState({
     isOpen: false,
     type: 'error',
@@ -86,6 +89,36 @@ export default function SystemDiagnosticsPage() {
     }
   };
 
+  const handleRecovery = async () => {
+    if (!selectedBackup || recoveryLoading) return;
+  
+    setRecoveryLoading(true);
+  
+    try {
+      const res = await api.restoreDiagnosticsBackup(selectedBackup);
+  
+      await loadSystemStatus();
+  
+      setShowRecoveryConfirm(false);
+  
+      showFeedback(
+        'success',
+        'Recovery Database Berhasil',
+        res.message || 'Database pengujian berhasil dipulihkan.'
+      );
+    } catch (err) {
+      showFeedback(
+        'error',
+        'Recovery Database Gagal',
+        err.payload?.message ||
+          err.message ||
+          'Terjadi kesalahan saat melakukan recovery.'
+      );
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadSystemStatus();
   }, []);
@@ -117,6 +150,79 @@ export default function SystemDiagnosticsPage() {
     } finally {
       setResetting(false);
     }
+  };
+
+  const backupFiles = sysInfo?.backupFiles || [];
+
+  const manualBackups = backupFiles
+    .filter(
+      (file) =>
+        file.backupType === "manual" &&
+        file.name.endsWith(".dump")
+    )
+    .slice(0, 3);
+
+  const recoveryBackups = backupFiles
+    .filter(
+      (file) =>
+        file.backupType === "pre_recovery" &&
+        file.name.endsWith(".dump")
+    )
+    .slice(0, 3);
+
+  const legacyBackups = backupFiles.filter(
+    (file) =>
+      file.backupType === "other" &&
+      file.name.endsWith(".dump")
+  );
+
+  const renderBackupList = (files, emptyMessage) => {
+    if (files.length === 0) {
+      return (
+        <p className="text-xs text-[#656d76] py-3 text-center">
+          {emptyMessage}
+        </p>
+      );
+    }
+  
+    return (
+      <div className="space-y-1.5">
+        {files.map((bf) => (
+          <div
+            key={bf.name}
+            className="flex items-center justify-between gap-2 font-mono text-[11px] bg-emerald-50/60 border border-emerald-300 px-2.5 py-2 rounded"
+          >
+            <div className="min-w-0">
+              <div className="font-semibold text-emerald-900 break-all">
+                {bf.name}
+              </div>
+  
+              <div className="text-[10px] text-emerald-700 mt-0.5">
+                {formatDateTime(bf.modifiedAt)}
+              </div>
+            </div>
+  
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-emerald-700">
+                {(bf.sizeBytes / 1024).toFixed(1)} KB
+              </span>
+  
+              <button
+                type="button"
+                disabled={recoveryLoading}
+                onClick={() => {
+                  setSelectedBackup(bf.name);
+                  setShowRecoveryConfirm(true);
+                }}
+                className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white font-semibold disabled:opacity-50"
+              >
+                Recovery
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -330,21 +436,59 @@ export default function SystemDiagnosticsPage() {
             </div>
             <div className="p-4 space-y-3 text-xs">
               <div>
-                <div className="font-semibold text-[#656d76] mb-1">
-                  Arsip Backup Terverifikasi di <code className="font-mono">/database/backups/</code>:
-                </div>
-                <div className="space-y-1">
-                  {(sysInfo.backupFiles || []).map((bf) => (
-                    <div
-                      key={bf.name}
-                      className="flex items-center justify-between font-mono text-[11px] bg-emerald-50/60 border border-emerald-300 px-2.5 py-1.5 rounded"
-                    >
-                      <span className="font-semibold text-emerald-900">{bf.name}</span>
-                      <span className="text-emerald-700">
-                        {(bf.sizeBytes / 1024).toFixed(1)} KB
-                      </span>
+              <div className="space-y-4">
+
+                {/* Backup Manual */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-semibold text-[#1f2328]">
+                      Backup Manual
                     </div>
-                  ))}
+
+                    <span className="text-[10px] text-[#656d76]">
+                      {manualBackups.length} dari 3 terbaru
+                    </span>
+                  </div>
+
+                  {renderBackupList(
+                    manualBackups,
+                    "Belum ada backup manual."
+                  )}
+                </div>
+
+                {/* Backup Pengaman Recovery */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-semibold text-[#1f2328]">
+                      Backup Pengaman Recovery
+                    </div>
+
+                    <span className="text-[10px] text-[#656d76]">
+                      {recoveryBackups.length} dari 3 terbaru
+                    </span>
+                  </div>
+
+                  {renderBackupList(
+                    recoveryBackups,
+                    "Belum ada backup pengaman recovery."
+                  )}
+                </div>
+
+                {/* Backup Lama */}
+                {legacyBackups.length > 0 && (
+                  <details className="border border-[#d0d7de] rounded-md p-2.5">
+                    <summary className="font-semibold text-[#656d76] cursor-pointer">
+                      Arsip Backup Lama ({legacyBackups.length})
+                    </summary>
+
+                    <div className="mt-2">
+                      {renderBackupList(
+                        legacyBackups,
+                        "Tidak ada arsip backup lama."
+                      )}
+                    </div>
+                  </details>
+                )}
                 </div>
               </div>
 
@@ -364,6 +508,51 @@ export default function SystemDiagnosticsPage() {
                   ))}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRecoveryConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-lg p-5 w-full max-w-md shadow-xl">
+            <h3 className="font-bold text-base mb-2">
+              Konfirmasi Recovery Database
+            </h3>
+
+            <p className="text-sm text-slate-600 mb-3">
+              Apakah kamu yakin ingin memulihkan database menggunakan file berikut?
+            </p>
+
+            <div className="p-3 bg-slate-100 rounded text-xs font-mono break-all mb-3">
+              {selectedBackup}
+            </div>
+
+            <p className="text-xs text-red-700 mb-4">
+              <strong>PERINGATAN:</strong> Recovery akan dilakukan langsung pada
+              database utama <strong>kalawaservice</strong>. Data dan perubahan
+              setelah backup dipilih dapat tertimpa. Backup pengaman akan dibuat
+              sebelum proses recovery dimulai.
+            </p>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={recoveryLoading}
+                onClick={() => setShowRecoveryConfirm(false)}
+                className="px-3 py-2 text-sm border rounded"
+              >
+                Batal
+              </button>
+
+              <button
+                type="button"
+                disabled={recoveryLoading}
+                onClick={handleRecovery}
+                className="px-3 py-2 text-sm bg-blue-600 text-white rounded"
+              >
+                {recoveryLoading ? 'Memulihkan...' : 'Ya, Recovery'}
+              </button>
             </div>
           </div>
         </div>

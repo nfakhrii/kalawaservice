@@ -28,6 +28,22 @@ class DiagnosticsController {
     }
   }
 
+  async restoreBackup(req, res, next) {
+    try {
+      const { filename } = req.body;
+  
+      const result = await backupService.restoreBackup(filename);
+  
+      return res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
   async resetDatabase(req, res, next) {
     try {
       const data = await diagnosticsService.resetDatabaseToSeed();

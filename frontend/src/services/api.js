@@ -201,5 +201,12 @@ export const api = {
     apiRequest("/diagnostics/backup", {
       method: "POST",
     }),
+
+  // Memulihkan database dari file backup
+  restoreDiagnosticsBackup: (filename) =>
+    apiRequest("/diagnostics/recovery", {
+      method: "POST",
+      body: { filename },
+    }),
 };
 
