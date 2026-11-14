@@ -10,14 +10,35 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatDateTime } from '../../utils/formatters';
-import { AlertBanner } from '../../components/ui/GitHubComponents';
+import { FeedbackModal } from '../../components/ui/GitHubComponents';
 
 export default function SystemDiagnosticsPage() {
   const [sysInfo, setSysInfo] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [resetting, setResetting] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
-  const [alert, setAlert] = useState(null);
+  const [feedback, setFeedback] = useState({
+    isOpen: false,
+    type: 'error',
+    title: '',
+    message: '',
+  });
+
+  const showFeedback = (type, title, message) => {
+    setFeedback({
+      isOpen: true,
+      type,
+      title,
+      message,
+    });
+  };
+  
+  const closeFeedback = () => {
+    setFeedback((prev) => ({
+      ...prev,
+      isOpen: false,
+    }));
+  };
 
   const loadSystemStatus = async () => {
     try {
@@ -34,34 +55,32 @@ export default function SystemDiagnosticsPage() {
 
   const handleCreateBackup = async () => {
     if (backupLoading) return;
-
+  
     setBackupLoading(true);
-    setAlert(null);
-
+  
     try {
       const res = await api.createDiagnosticsBackup();
-
+  
       // Refresh daftar backup setelah proses berhasil.
       await loadSystemStatus();
-
-      setAlert({
-        type: 'success',
-        title: 'Backup Database Berhasil',
-        message: res.files?.length
-          ? `File backup berhasil dibuat: ${res.files.join(', ')}`
-          : res.message || 'Backup database berhasil dibuat.',
-      });
+  
+      showFeedback(
+        'success',
+        'Backup Database Berhasil',
+        res.files?.length
+          ? `File backup berhasil dibuat:\n${res.files.join('\n')}`
+          : res.message || 'Backup database berhasil dibuat.'
+      );
     } catch (err) {
       console.error('[Create Backup Error]:', err);
-
-      setAlert({
-        type: 'error',
-        title: 'Gagal Membuat Backup',
-        message:
-          err.payload?.message ||
+  
+      showFeedback(
+        'error',
+        'Gagal Membuat Backup',
+        err.payload?.message ||
           err.message ||
-          'Terjadi kesalahan saat membuat backup database.',
-      });
+          'Terjadi kesalahan saat membuat backup database.'
+      );
     } finally {
       setBackupLoading(false);
     }
@@ -73,20 +92,28 @@ export default function SystemDiagnosticsPage() {
 
   const handleResetDatabase = async () => {
     setResetting(true);
-    setAlert(null);
+  
     try {
       const res = await api.resetDatabase();
+  
       setSysInfo(res.data?.inspection);
+  
       const auditRes = await api.getAuditLogs(30);
       setAuditLogs(auditRes.data || []);
-      setAlert({
-        type: 'success',
-        title: 'Database Kelompok 1 Berhasil Di-Reset ke Kondisi Seed Awal',
-        message:
-          'Kelompok1_schema.sql, Kelompok1_insert.sql, Kelompok1_admin_security.sql, Kelompok1_programming.sql, dan Kelompok1_migration_tugas4.sql telah dieksekusi ulang.',
-      });
+  
+      showFeedback(
+        'success',
+        'Database Berhasil Di-Reset',
+        'Database Kelompok 1 berhasil dikembalikan ke kondisi seed awal.'
+      );
     } catch (err) {
-      setAlert({ type: 'error', title: 'Gagal Reset Database', message: err.message });
+      showFeedback(
+        'error',
+        'Gagal Reset Database',
+        err.payload?.message ||
+          err.message ||
+          'Terjadi kesalahan saat mereset database.'
+      );
     } finally {
       setResetting(false);
     }
@@ -120,15 +147,6 @@ export default function SystemDiagnosticsPage() {
           </button>
         </div>
       </div>
-
-      {alert && (
-        <AlertBanner
-          type={alert.type}
-          title={alert.title}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
 
       {/* Live AUDIT_LOG JSONB Viewer (Kelompok 1 trg_audit_log) */}
       <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
@@ -350,6 +368,14 @@ export default function SystemDiagnosticsPage() {
           </div>
         </div>
       )}
+
+      <FeedbackModal
+        isOpen={feedback.isOpen}
+        type={feedback.type}
+        title={feedback.title}
+        message={feedback.message}
+        onClose={closeFeedback}
+      />
     </div>
   );
 }
