@@ -59,15 +59,15 @@ router.delete(
 
 // Motor (Vehicles)
 router.get('/vehicles', registryController.getVehicles);
-router.post('/vehicles', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'kasir'), registryController.createVehicle);
-router.put('/vehicles/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang', 'kasir'), registryController.updateVehicle);
+router.post('/vehicles', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.createVehicle);
+router.put('/vehicles/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.updateVehicle);
 router.delete('/vehicles/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.deleteVehicle);
 
 // Jasa Servis (Services)
 router.get('/services', registryController.getServices);
-router.post('/services', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.createService);
-router.put('/services/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.updateService);
-router.delete('/services/:id', authorizeRoles('owner', 'role_owner', 'admin_cabang'), registryController.deleteService);
+router.post('/services', authorizeRoles('owner'), registryController.createService);
+router.put('/services/:id', authorizeRoles('owner'), registryController.updateService);
+router.delete('/services/:id', authorizeRoles('owner'), registryController.deleteService);
 
   // ==========================================================================
   // SUKU CADANG (SPAREPARTS)
