@@ -60,8 +60,28 @@ export default function AppShell() {
     { to: '/app/registry', label: 'Registry (Master CRUD)', icon: Database },
     { to: '/app/operations', label: 'Operations (WO & Kasir)', icon: GitPullRequest },
     { to: '/app/corporate', label: 'Corporate B2B Fleet', icon: Building2, badge: 'NEW' },
-    { to: '/app/analytics', label: 'Analytics (4 JOIN)', icon: BarChart3 },
-    { to: '/app/system/diagnostics', label: 'PostgreSQL Audit', icon: Bug },
+  
+    // Analytics disembunyikan untuk Kasir dan Mekanik.
+    ...(canAccessAnalytics
+      ? [
+          {
+            to: '/app/analytics',
+            label: 'Analytics (4 JOIN)',
+            icon: BarChart3,
+          },
+        ]
+      : []),
+  
+    // PostgreSQL Audit hanya ditampilkan untuk Owner dan Auditor.
+    ...(canAccessAudit
+      ? [
+          {
+            to: '/app/system/diagnostics',
+            label: 'PostgreSQL Audit',
+            icon: Bug,
+          },
+        ]
+      : []),
   ];
 
   const currentRoleMeta = ROLE_METADATA[user?.role] || ROLE_METADATA.admin_cabang;

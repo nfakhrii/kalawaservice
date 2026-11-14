@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   RefreshCw,
   RotateCcw,
+  LoaderCircle,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatDateTime } from '../../utils/formatters';
@@ -15,6 +16,7 @@ export default function SystemDiagnosticsPage() {
   const [sysInfo, setSysInfo] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [resetting, setResetting] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
   const loadSystemStatus = async () => {
@@ -27,6 +29,41 @@ export default function SystemDiagnosticsPage() {
       setAuditLogs(auditRes.data || []);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleCreateBackup = async () => {
+    if (backupLoading) return;
+
+    setBackupLoading(true);
+    setAlert(null);
+
+    try {
+      const res = await api.createDiagnosticsBackup();
+
+      // Refresh daftar backup setelah proses berhasil.
+      await loadSystemStatus();
+
+      setAlert({
+        type: 'success',
+        title: 'Backup Database Berhasil',
+        message: res.files?.length
+          ? `File backup berhasil dibuat: ${res.files.join(', ')}`
+          : res.message || 'Backup database berhasil dibuat.',
+      });
+    } catch (err) {
+      console.error('[Create Backup Error]:', err);
+
+      setAlert({
+        type: 'error',
+        title: 'Gagal Membuat Backup',
+        message:
+          err.payload?.message ||
+          err.message ||
+          'Terjadi kesalahan saat membuat backup database.',
+      });
+    } finally {
+      setBackupLoading(false);
     }
   };
 
@@ -247,11 +284,31 @@ export default function SystemDiagnosticsPage() {
           </div>
 
           <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
-            <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex items-center gap-2">
-              <HardDriveDownload className="w-4 h-4 text-[#1f883d]" />
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-[#1f2328]">
-                Backup &amp; Recovery Verification (04_backup_recovery.sh)
-              </h3>
+            <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <HardDriveDownload className="w-4 h-4 text-[#1f883d]" />
+
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-[#1f2328]">
+                  Backup &amp; Recovery Verification (04_backup_recovery.sh)
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCreateBackup}
+                disabled={backupLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[#1f883d] hover:bg-[#1a7f37] text-white disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {backupLoading ? (
+                  <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <HardDriveDownload className="w-3.5 h-3.5" />
+                )}
+
+                <span>
+                  {backupLoading ? 'Membuat Backup...' : 'Buat Backup Sekarang'}
+                </span>
+              </button>
             </div>
             <div className="p-4 space-y-3 text-xs">
               <div>

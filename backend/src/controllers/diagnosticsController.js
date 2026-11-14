@@ -1,4 +1,5 @@
 const diagnosticsService = require('../services/diagnosticsService');
+const backupService = require('../services/backupService');
 
 class DiagnosticsController {
   async getSystemStatus(req, res, next) {
@@ -7,6 +8,20 @@ class DiagnosticsController {
       return res.status(200).json({
         success: true,
         data,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  async createBackup(req, res, next) {
+    try {
+      const result = await backupService.createBackup();
+  
+      return res.status(201).json({
+        success: true,
+        message: result.message,
+        files: result.files,
       });
     } catch (err) {
       return next(err);

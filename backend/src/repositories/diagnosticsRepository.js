@@ -1,22 +1,39 @@
 const db = require('../config/db');
 const fs = require('fs');
 const path = require('path');
+const AppError = require("../utils/AppError");
 
 class DiagnosticsRepository {
   getRoleFlags() {
     const user = db.getCurrentUserContext();
-    const role = user?.role || 'admin_cabang';
+    const role = String(user?.role || "").toLowerCase();
+
+    const allowedRoles = ["owner", "auditor"];
+
+    if (!allowedRoles.includes(role)) {
+      throw new AppError(
+        "Anda tidak memiliki izin untuk mengakses informasi PostgreSQL Diagnostics.",
+        403,
+        "FORBIDDEN_DIAGNOSTICS_ACCESS"
+      );
+    }
+
     return {
       role,
-      isRestrictedCustomer: ['kasir', 'mekanik', 'gudang', 'auditor'].includes(role),
-      isRestrictedWo: ['mekanik', 'gudang', 'auditor'].includes(role),
-      canReadAuditLog: ['owner', 'admin_cabang', 'auditor'].includes(role),
+      isRestrictedCustomer: role === "auditor",
+      isRestrictedWo: role === "auditor",
+      canReadAuditLog: true,
     };
   }
 
   async getSystemInspection() {
-    const { isRestrictedCustomer, isRestrictedWo, canReadAuditLog } = this.getRoleFlags();
-    const customerSource = isRestrictedCustomer ? '"VW_PELANGGAN_AMAN"' : '"PELANGGAN"';
+    const { isRestrictedCustomer, isRestrictedWo, canReadAuditLog } =
+      this.getRoleFlags();
+
+    const customerSource = isRestrictedCustomer
+      ? '"VW_PELANGGAN_AMAN"'
+      : '"PELANGGAN"';
+
     const woSource = isRestrictedWo ? '"VW_WORK_ORDER_AMAN"' : '"WORK_ORDER"';
 
     const triggersSql = `
@@ -67,12 +84,30 @@ class DiagnosticsRepository {
         (SELECT COUNT(*) FROM "WO_SUKU_CADANG") AS wo_suku_cadang,
         (SELECT COUNT(*) FROM "GARANSI") AS garansi,
         (SELECT COUNT(*) FROM "TAGIHAN_KOLEKTIF") AS tagihan_kolektif,
-        ${canReadAuditLog ? '(SELECT COUNT(*) FROM "AUDIT_LOG")' : '0'} AS audit_log;
+        ${
+          canReadAuditLog ? '(SELECT COUNT(*) FROM "AUDIT_LOG")' : "0"
+        } AS audit_log;
     `;
 
     const paidWoSelect = isRestrictedWo
-      ? `(SELECT work_no FROM "VW_WORK_ORDER_AMAN" WHERE work_status IN ('Selesai', 'Dibayar') ORDER BY work_no ASC LIMIT 1)`
-      : `(SELECT work_no FROM "WORK_ORDER" WHERE pembayaran_status = 'Lunas' ORDER BY work_no ASC LIMIT 1)`;
+        ? `
+      (
+        SELECT work_no
+        FROM "VW_WORK_ORDER_AMAN"
+        WHERE work_status IN ('Selesai', 'Dibayar')
+        ORDER BY work_no ASC
+        LIMIT 1
+      )
+    `
+      : `
+        (
+          SELECT work_no
+          FROM "WORK_ORDER"
+          WHERE pembayaran_status = 'Lunas'
+          ORDER BY work_no ASC
+          LIMIT 1
+        )
+      `;
 
     const sampleTargetsSql = `
       SELECT
@@ -111,15 +146,16 @@ class DiagnosticsRepository {
         ) AS low_stock_qty;
     `;
 
-    const [trigRes, viewRes, routineRes, countRes, targetRes] = await Promise.all([
-      db.query(triggersSql),
-      db.query(viewsSql),
-      db.query(routinesSql),
-      db.query(countsSql),
-      db.query(sampleTargetsSql),
-    ]);
+    const [trigRes, viewRes, routineRes, countRes, targetRes] =
+      await Promise.all([
+        db.query(triggersSql),
+        db.query(viewsSql),
+        db.query(routinesSql),
+        db.query(countsSql),
+        db.query(sampleTargetsSql),
+      ]);
 
-    const backupDir = path.resolve(__dirname, '../../../database/backups');
+    const backupDir = path.resolve(__dirname, "../../../database/backups");
     let backupFiles = [];
     if (fs.existsSync(backupDir)) {
       backupFiles = fs.readdirSync(backupDir).map((f) => {
@@ -143,6 +179,8 @@ class DiagnosticsRepository {
   }
 
   async getAuditLogs(filters = {}) {
+    this.getRoleFlags();
+
     const params = [];
     const conditions = [];
 
@@ -157,7 +195,8 @@ class DiagnosticsRepository {
       conditions.push(`UPPER(al.nama_operasi) = $${params.length}`);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.min(Number(filters.limit || 50), 200);
     params.push(limit);
 

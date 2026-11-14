@@ -356,15 +356,38 @@ export default function App() {
 
             {/* 4 Multi-Table JOIN Reports */}
             <Route path="analytics" element={<AnalyticsLayout />}>
-              <Route index element={<Navigate to="/app/analytics/vehicle-history" replace />} />
-              <Route path="vehicle-history" element={<VehicleHistoryReportPage />} />
-              <Route path="branch-revenue" element={<BranchRevenueReportPage />} />
-              <Route path="sparepart-usage" element={<SparepartUsageReportPage />} />
-              <Route path="low-stock" element={<LowStockReportPage />} />
+              <Route index element={<AnalyticsIndexRedirect />} />
+
+              <Route
+                path="vehicle-history"
+                element={<VehicleHistoryReportPage />}
+              />
+
+              <Route
+                path="branch-revenue"
+                element={<BranchRevenueReportPage />}
+              />
+
+              <Route
+                path="sparepart-usage"
+                element={<SparepartUsageReportPage />}
+              />
+
+              <Route
+                path="low-stock"
+                element={<LowStockReportPage />}
+              />
             </Route>
 
-            {/* System Diagnostics (5 Debugging Scenarios) */}
-            <Route path="system/diagnostics" element={<SystemDiagnosticsPage />} />
+            {/* System Diagnostics - Owner & Auditor Only */}
+            <Route
+              path="system/diagnostics"
+              element={
+                <AuditAccessRoute>
+                  <SystemDiagnosticsPage />
+                </AuditAccessRoute>
+              }
+            />
           </Route>
 
           {/* Fallback */}

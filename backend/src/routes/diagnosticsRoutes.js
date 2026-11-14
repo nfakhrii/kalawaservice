@@ -10,11 +10,22 @@ const router = express.Router();
 
 router.use(authenticateToken);
 
-router.get("/status", diagnosticsController.getSystemStatus);
+// Hanya Owner dan Auditor yang dapat melihat informasi diagnostik.
+const diagnosticsAccess = authorizeRoles("owner", "auditor");
 
-// Reset database lewat HTTP dinonaktifkan.
-// Gunakan skrip reset internal hanya pada lingkungan pengujian.
+// Hanya Owner yang dapat membuat backup database.
+const backupAccess = authorizeRoles("owner");
 
+router.get("/status", diagnosticsAccess, diagnosticsController.getSystemStatus);
+
+// Membuat backup database secara manual (khusus Owner).
+router.post(
+  "/backup",
+  backupAccess,
+  diagnosticsController.createBackup
+);
+
+// Reset database melalui HTTP tetap dinonaktifkan.
 router.post("/reset-db", (req, res) => {
   return res.status(403).json({
     success: false,
@@ -22,23 +33,11 @@ router.post("/reset-db", (req, res) => {
   });
 });
 
-// Endpoint pembuat token role dihapus.
-
+// Audit log hanya dapat dibaca Owner dan Auditor.
 router.get(
   "/audit-logs",
-  authorizeRoles("owner", "admin_cabang", "auditor"),
+  diagnosticsAccess,
   diagnosticsController.getAuditLogs
-);
-
-router.post(
-  "/privileged-audit-action",
-  authorizeRoles("owner", "admin_cabang"),
-  (req, res) => {
-    return res.status(200).json({
-      success: true,
-      message: "Pemeriksaan hak akses endpoint berhasil.",
-    });
-  }
 );
 
 module.exports = router;
