@@ -25,6 +25,17 @@ export default function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const currentRole = String(user?.role || '').toLowerCase().trim();
+
+  const hiddenAnalyticsRoles = ['kasir', 'mekanik'];
+
+  const canAccessAnalytics = !hiddenAnalyticsRoles.includes(currentRole);
+
+  // PostgreSQL Audit hanya dapat diakses Owner dan Auditor.
+  const allowedAuditRoles = ['owner', 'auditor'];
+
+  const canAccessAudit = allowedAuditRoles.includes(currentRole);
+
   const pathSegments = location.pathname
     .split('/')
     .filter((seg) => seg && seg !== 'app');

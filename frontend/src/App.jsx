@@ -1,5 +1,11 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+} from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AppShell from './components/layout/AppShell';
 import LoginPage from './pages/auth/LoginPage';
@@ -86,6 +92,86 @@ function RoleProtectedRoute({ children, allowedRoles }) {
   return children;
 }
 
+function AuditAccessRoute({ children }) {
+  const { user, isAuthenticated, checkingAuth } = useAuth();
+  const navigate = useNavigate();
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-sm text-gray-500">
+          Memeriksa sesi pengguna...
+        </p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/auth/login" replace />;
+  }
+
+  const role = String(user?.role || '').toLowerCase().trim();
+
+  const allowedRoles = ['owner', 'auditor'];
+
+  // Owner dan Auditor dapat mengakses PostgreSQL Audit.
+  if (allowedRoles.includes(role)) {
+    return children;
+  }
+
+  // Role selain Owner dan Auditor akan melihat popup.
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-md rounded-xl border border-[#d0d7de] bg-white p-6 shadow-xl">
+        <div className="flex flex-col items-center text-center">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#dc2626"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect
+                x="3"
+                y="11"
+                width="18"
+                height="11"
+                rx="2"
+              />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              <circle cx="12" cy="16" r="1" />
+            </svg>
+          </div>
+
+          <h2 className="mb-2 text-lg font-bold text-[#24292f]">
+            Akses Tidak Diizinkan
+          </h2>
+
+          <p className="mb-6 text-sm leading-relaxed text-[#656d76]">
+            Maaf, akun Anda tidak memiliki hak akses untuk
+            membuka halaman PostgreSQL Audit ini. Silakan
+            hubungi administrator jika Anda membutuhkan
+            akses tersebut.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => navigate('/app/overview', { replace: true })}
+            className="w-full rounded-md bg-[#0969da] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#0860ca] cursor-pointer"
+          >
+            Mengerti
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RegistryIndexRedirect() {
   const { user } = useAuth();
   const role = String(user?.role || '').toLowerCase().trim();
@@ -96,6 +182,18 @@ function RegistryIndexRedirect() {
       : role === 'mekanik'
         ? '/app/registry/vehicles'
         : '/app/registry/customers';
+
+  return <Navigate to={destination} replace />;
+}
+
+function AnalyticsIndexRedirect() {
+  const { user } = useAuth();
+  const role = String(user?.role || '').toLowerCase().trim();
+
+  const destination =
+    role === 'gudang'
+      ? '/app/analytics/sparepart-usage'
+      : '/app/analytics/vehicle-history';
 
   return <Navigate to={destination} replace />;
 }
